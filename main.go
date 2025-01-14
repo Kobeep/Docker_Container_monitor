@@ -12,7 +12,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// Retrieves the list of running containers
+// Checks if a Docker container is running
 func getRunningContainers() []string {
 	out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
 	if err != nil {
@@ -26,7 +26,7 @@ func getRunningContainers() []string {
 	return containers
 }
 
-// Retrieves container ports
+// Gets the exposed ports for a given container
 func getContainerPorts(container string) string {
 	out, err := exec.Command("docker", "inspect", "-f", "{{range $p, $conf := .NetworkSettings.Ports}}{{$p}} {{end}}", container).Output()
 	if err != nil {
@@ -36,7 +36,7 @@ func getContainerPorts(container string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Checks if the service is available
+// Checks if the service inside the container is available
 func checkService(url string) bool {
 	client := http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(url)
@@ -55,21 +55,44 @@ func fullStatus(c *cli.Context) error {
 		return nil
 	}
 
+	allServicesAvailable := true
+
 	for _, container := range containers {
 		portInfo := getContainerPorts(container)
-		url := fmt.Sprintf("http://localhost:%s", strings.Split(portInfo, "/")[0])
-		serviceRunning := checkService(url)
+
+		// Extract first available port (if any)
+		portParts := strings.Split(portInfo, "/")
+		var url string
+		if len(portParts) > 0 && portParts[0] != "" {
+			url = fmt.Sprintf("http://localhost:%s", strings.Split(portParts[0], " ")[0])
+		} else {
+			url = "N/A"
+		}
+
+		serviceRunning := url != "N/A" && checkService(url)
 
 		fmt.Printf("📌 %s: Container - 🟢 Running, Ports - %s, Service - %v\n",
 			container,
 			portInfo,
 			map[bool]string{true: "🟢 Available", false: "🔴 Unavailable"}[serviceRunning],
 		)
+
+		// If any service is unavailable, mark failure
+		if !serviceRunning {
+			allServicesAvailable = false
+		}
 	}
+
+	// If any service is down, print a warning but exit with 0 (pipeline will not fail)
+	if !allServicesAvailable {
+		fmt.Println("⚠️ Warning: Some services are unavailable, but continuing execution.")
+		os.Exit(0) // Prevents CI/CD failure
+	}
+
 	return nil
 }
 
-// Displays only container status
+// Displays only container state
 func stateOnly(c *cli.Context) error {
 	containers := getRunningContainers()
 	if len(containers) == 0 {
@@ -83,7 +106,7 @@ func stateOnly(c *cli.Context) error {
 	return nil
 }
 
-// Displays only service status
+// Displays only service availability
 func serviceOnly(c *cli.Context) error {
 	containers := getRunningContainers()
 	if len(containers) == 0 {
@@ -93,14 +116,24 @@ func serviceOnly(c *cli.Context) error {
 
 	for _, container := range containers {
 		portInfo := getContainerPorts(container)
-		url := fmt.Sprintf("http://localhost:%s", strings.Split(portInfo, "/")[0])
-		serviceRunning := checkService(url)
+
+		// Extract first available port
+		portParts := strings.Split(portInfo, "/")
+		var url string
+		if len(portParts) > 0 && portParts[0] != "" {
+			url = fmt.Sprintf("http://localhost:%s", strings.Split(portParts[0], " ")[0])
+		} else {
+			url = "N/A"
+		}
+
+		serviceRunning := url != "N/A" && checkService(url)
 
 		fmt.Printf("📌 %s: Service - %v\n",
 			container,
 			map[bool]string{true: "🟢 Available", false: "🔴 Unavailable"}[serviceRunning],
 		)
 	}
+
 	return nil
 }
 

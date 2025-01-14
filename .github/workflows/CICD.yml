@@ -54,6 +54,9 @@ jobs:
         run: |
           python3 install.py
 
+      - name: Stop and Clean Up Docker Containers
+        run: docker compose down
+
       - name: Verify Monitor Commands
         run: |
           echo "🔄 Testing monitor --service"

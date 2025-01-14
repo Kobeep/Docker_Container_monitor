@@ -1,5 +1,9 @@
 # Docker_Container_monitor🚀
 
+## CI/CD Status 🚀
+
+![GitHub Workflow Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/go-container-monitor.yml/badge.svg)
+
 ## Overview
 
 `Docker_Container_monitor` is a lightweight CLI tool written in `Go` that helps monitor running Docker containers and their services. It provides real-time information about container states and checks if the services inside the containers are available. The project includes a `Python` installer script to automate the setup process.
@@ -30,13 +34,13 @@ git clone https://github.com/yourusername/Docker_Container_monitor.git
 cd Docker_Container_monitor
 ```
 
-1. **Run the installation script:**
+2. **Run the installation script:**
 
 ```sh
 python3 install.py
 ```
 
-1. **Verify installation:**
+3. **Verify installation:**
 
 ```sh
 monitor --help

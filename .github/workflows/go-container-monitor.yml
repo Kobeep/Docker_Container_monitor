@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build and Test
+    name: Build/Test
     runs-on: ubuntu-latest
 
     steps:
@@ -48,10 +48,10 @@ jobs:
 
 
       - name: Start Docker Containers for Testing
-        run: docker-compose up -d
+        run: docker compose up -d
 
       - name: Wait for Containers to Initialize
-        run: sleep 10  # Ensure services are fully started
+        run: sleep 5  # Ensure services are fully started
 
       - name: Run Monitor Tool and Validate Output
         run: |

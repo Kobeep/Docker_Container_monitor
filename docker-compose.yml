@@ -2,32 +2,12 @@ version: '3.8'
 
 services:
   web1:
-    image: nginx:alpine
-    container_name: web1
-    ports:
-      - "8081:80"  # Host: 8081 → Container: 80
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost"]
-      interval: 10s
-      retries: 3
-
-  web2:
-    image: httpd:alpine
+    image: python:3.9-slim
     container_name: web2
-    ports:
-      - "8082:80"  # Host: 8082 → Container: 80
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost"]
-      interval: 10s
-      retries: 3
-
-  web3:
-    image: python:3.9-alpine
-    container_name: web3
     command: python3 -m http.server 8000
     ports:
-      - "8083:8000"  # Host: 8083 → Container: 8000
+      - "8000:8000"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
       interval: 10s
       retries: 3

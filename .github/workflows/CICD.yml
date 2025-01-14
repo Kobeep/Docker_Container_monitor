@@ -57,6 +57,14 @@ jobs:
       - name: Stop and Clean Up Docker Containers
         run: docker compose down
 
+      - name: Verify Monitor Commands
+        run: |
+          echo "🔄 Testing monitor --service"
+          monitor --service || { echo "❌ monitor --service failed"; exit 1; }
+
+          echo "🔄 Testing monitor --state"
+          monitor --state || { echo "❌ monitor --state failed"; exit 1; }
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:

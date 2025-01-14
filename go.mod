@@ -1,6 +1,6 @@
 module github.com/yourusername/Docker_Container_monitor
 
-go 1.22.10
+go 1.23
 
 require github.com/urfave/cli/v2 v2.27.5
 

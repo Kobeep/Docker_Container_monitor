@@ -17,19 +17,41 @@ if subprocess.run(["which", "go"], capture_output=True).returncode != 0:
     print("🔍 Go is not installed, installing...")
     os.system("sudo dnf install -y golang")
 
-# Copy `monitor.go` to temp directory
-loading_animation("Copying Go source code")
-os.system("cp monitor.go /tmp/monitor.go")
+# Ensure monitor.go exists
+if not os.path.exists("monitor.go"):
+    print("❌ Error: monitor.go not found!")
+    sys.exit(1)
 
-#Compile `monitor.go`
+# Copy monitor.go and go.mod to /tmp
+loading_animation("Copying Go source code")
+os.system("mkdir -p /tmp/monitor_build && cp monitor.go go.mod /tmp/monitor_build/")
+
+# Initialize Go modules in /tmp
+loading_animation("Initializing Go modules")
+os.system("cd /tmp/monitor_build && go mod tidy")
+
+# Install dependencies (Ensure CLI package is installed)
+loading_animation("Installing Go dependencies")
+os.system("cd /tmp/monitor_build && go get github.com/urfave/cli/v2")
+
+# Compile `monitor.go`
 loading_animation("Compiling Go application")
-os.system("cd /tmp && go build -o monitor monitor.go")
+compile_status = os.system("cd /tmp/monitor_build && go build -o monitor monitor.go")
+if compile_status != 0:
+    print("❌ Error: Failed to compile monitor.go")
+    sys.exit(1)
 
 # Move binary to `/usr/local/bin`
 loading_animation("Installing monitor command")
-os.system("sudo mv /tmp/monitor /usr/local/bin/")
+os.system("sudo mv /tmp/monitor_build/monitor /usr/local/bin/")
+os.system("sudo chmod +x /usr/local/bin/monitor")
 
-#  Create systemd service
+# Verify installation
+if not os.path.exists("/usr/local/bin/monitor"):
+    print("❌ Error: monitor binary not found in /usr/local/bin/")
+    sys.exit(1)
+
+# Create systemd service
 loading_animation("Setting up systemd service")
 service_config = """
 [Unit]

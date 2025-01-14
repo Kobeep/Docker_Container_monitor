@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: 1.23
+          go-version: '1.23'
 
       - name: Install Dependencies
         run: go mod tidy
@@ -27,11 +27,20 @@ jobs:
       - name: Build Binary
         run: go build -o monitor
 
+      - name: Install Docker and Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io docker-compose
+          sudo systemctl start docker
+          sudo systemctl enable docker
+          docker --version
+          docker-compose --version
+
       - name: Start Docker Containers for Testing
         run: docker-compose up -d
 
       - name: Wait for Containers to Initialize
-        run: sleep 10  # Ensures services are fully started
+        run: sleep 10  # Ensure services are fully started
 
       - name: Run Monitor Tool and Validate Output
         run: |

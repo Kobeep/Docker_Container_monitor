@@ -50,7 +50,7 @@ jobs:
         run: docker compose -f docker-compose.yml up -d
 
       - name: Wait for Containers to Initialize
-        run: sleep 5  # Ensure services are fully started
+        run: sleep 10  # Ensure services are fully started
 
       - name: Run Monitor Tool and Validate Output
         run: |

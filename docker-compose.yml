@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  web1:
+    image: nginx:latest
+    container_name: web1
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      retries: 3
+
+  web2:
+    image: python:3.9-slim
+    container_name: web2
+    command: python3 -m http.server 8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 10s
+      retries: 3

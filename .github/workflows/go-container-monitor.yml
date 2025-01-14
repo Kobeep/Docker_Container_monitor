@@ -1,0 +1,77 @@
+name: Go Container Monitor CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.19
+
+      - name: Install Dependencies
+        run: go mod tidy
+
+      - name: Build Binary
+        run: go build -o monitor
+
+      - name: Start Docker Containers for Testing
+        run: docker-compose up -d
+
+      - name: Wait for Containers to Initialize
+        run: sleep 10  # Ensures services are fully started
+
+      - name: Run Monitor Tool and Validate Output
+        run: |
+          ./monitor | tee monitor_output.txt
+          cat monitor_output.txt | grep -q "web1:.*Running.*Available"
+          cat monitor_output.txt | grep -q "web2:.*Running.*Available"
+
+      - name: Stop and Clean Up Docker Containers
+        run: docker-compose down
+
+      - name: Run Go Tests
+        run: go test ./...
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: monitor-binary
+          path: monitor
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: monitor-binary
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "Release v1.0.${{ github.run_number }}"
+          body: "Automated release for GO Container Monitor"
+          files: monitor
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

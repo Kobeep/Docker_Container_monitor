@@ -26,8 +26,8 @@
 1. **Clone the repository**:
 
 ```sh
-git clone https://github.com/yourusername/go-container-monitor.git
-cd go-container-monitor
+git clone https://github.com/yourusername/Docker_Container_monitor.git
+cd Docker_Container_monitor
 ```
 
 1. **Run the installation script:**
@@ -81,7 +81,7 @@ sudo systemctl stop monitor
 sudo systemctl disable monitor
 sudo rm /usr/local/bin/monitor
 sudo rm /etc/systemd/system/monitor.service
-rm -rf ~/go-container-monitor
+rm -rf ~/Docker_Container_monitor
 ```
 ## Contributing
 

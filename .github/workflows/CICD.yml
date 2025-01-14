@@ -57,10 +57,10 @@ jobs:
       - name: Verify Monitor Commands
         run: |
           echo "🔄 Testing monitor --service"
-          monitor --service || { echo "❌ monitor --service failed"; exit 1; }
+          monitor service || { echo "❌ monitor service failed"; exit 1; }
 
           echo "🔄 Testing monitor --state"
-          monitor --state || { echo "❌ monitor --state failed"; exit 1; }
+          monitor state || { echo "❌ monitor state failed"; exit 1; }
       
 
       - name: Stop and Clean Up Docker Containers

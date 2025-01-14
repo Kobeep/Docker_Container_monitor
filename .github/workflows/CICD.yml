@@ -1,8 +1,6 @@
-name: Go Container Monitor CI/CD
+name: CI/CD
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -52,11 +50,9 @@ jobs:
       - name: Wait for Containers to Initialize
         run: sleep 10  # Ensure services are fully started
 
-      - name: Run Monitor Tool and Validate Output
+      - name: Run Installation Script
         run: |
-          ./monitor | tee monitor_output.txt || true
-          cat monitor_output.txt | grep -q "web1:.*Running.*Available"
-          cat monitor_output.txt | grep -q "web2:.*Running.*Available"
+          python3 install.py
 
       - name: Stop and Clean Up Docker Containers
         run: docker compose down

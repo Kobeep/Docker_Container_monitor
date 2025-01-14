@@ -1,15 +1,9 @@
 version: '3.8'
-
 services:
   web1:
-    image: nginx:latest
-    container_name: web1
+    image: nginx:1-alpine
     ports:
-      - "8080:80"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost"]
-      interval: 10s
-      retries: 3
+      - 8089:80
 
   web2:
     image: python:3.9-slim

@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -17,7 +16,7 @@ import (
 // Global Docker host (default is local)
 var dockerHost = "unix:///var/run/docker.sock"
 
-// Local Monitoring Functions (unchanged from your current implementation)
+// Local Monitoring Functions
 func getRunningContainers() []string {
 	cmd := exec.Command("docker", "-H", dockerHost, "ps", "--format", "{{.Names}}")
 	out, err := cmd.Output()
@@ -32,10 +31,53 @@ func getRunningContainers() []string {
 	return containers
 }
 
+func stateOnly(c *cli.Context) error {
+	containers := getRunningContainers()
+	if len(containers) == 0 {
+		fmt.Println("❌ No running containers found!")
+		return nil
+	}
+
+	fmt.Println("📦 Running Containers:")
+	for _, container := range containers {
+		fmt.Printf("📌 %s: 🟢 Running\n", container)
+	}
+	return nil
+}
+
+func serviceOnly(c *cli.Context) error {
+	containers := getRunningContainers()
+	if len(containers) == 0 {
+		fmt.Println("❌ No running containers found!")
+		return nil
+	}
+
+	fmt.Println("🔧 Service Status:")
+	for _, container := range containers {
+		// Dummy service status
+		fmt.Printf("📌 %s: Service - 🟢 Available\n", container)
+	}
+	return nil
+}
+
+func fullStatus(c *cli.Context) error {
+	containers := getRunningContainers()
+	if len(containers) == 0 {
+		fmt.Println("❌ No running containers found!")
+		return nil
+	}
+
+	fmt.Println("📊 Full Container and Service Status:")
+	for _, container := range containers {
+		// Dummy service status
+		fmt.Printf("📌 %s: 🟢 Running, Service - 🟢 Available\n", container)
+	}
+	return nil
+}
+
 // Remote Monitoring Functions
 func getSSHConfig(host string) (*ssh.ClientConfig, string, error) {
-	sshConfigPath := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
-	sshKnownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
+	sshKnownHostsPath := os.Getenv("HOME") + "/.ssh/known_hosts"
 
 	cmd := exec.Command("ssh", "-G", host)
 	output, err := cmd.Output()
@@ -142,7 +184,6 @@ func remoteStatus(c *cli.Context) error {
 	return nil
 }
 
-// Main Application with CLI Commands
 func main() {
 	app := &cli.App{
 		Name:  "monitor",

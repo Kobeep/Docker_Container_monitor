@@ -43,12 +43,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-
-      - name: Start Docker Containers for Testing
+      - name: Start Local Docker Containers for Testing
         run: docker compose -f docker-compose.yml up -d
 
-      - name: Wait for Containers to Initialize
+      - name: Wait for Local Containers to Initialize
         run: sleep 10  # Ensure services are fully started
+
+      - name: Set Up Remote Docker Host (via SSH)
+        run: |
+          # Simulate a remote Docker host by creating an SSH-accessible Docker environment
+          sudo apt-get install -y openssh-server
+          sudo systemctl start ssh
+          echo "Setting up SSH keys for CI"
+          ssh-keygen -t rsa -b 2048 -f /tmp/ci_ssh_key -q -N ""
+          mkdir -p ~/.ssh
+          cat /tmp/ci_ssh_key.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          ssh-keyscan localhost >> ~/.ssh/known_hosts
+          sudo usermod -aG docker $USER
+
+          echo "Docker host setup complete. Use ssh -i /tmp/ci_ssh_key localhost to connect."
+
+      - name: Test Monitor Remote Functionality
+        run: |
+          echo "🔄 Testing monitor remote --host localhost"
+          monitor remote --host localhost || { echo "❌ monitor remote failed"; exit 1; }
 
       - name: Run Installation Script
         run: |
@@ -61,7 +80,6 @@ jobs:
 
           echo "🔄 Testing monitor --state"
           monitor state || { echo "❌ monitor state failed"; exit 1; }
-
 
       - name: Stop and Clean Up Docker Containers
         run: docker compose down

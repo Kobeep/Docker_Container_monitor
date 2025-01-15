@@ -22,8 +22,11 @@ jobs:
       - name: Install Dependencies
         run: go mod tidy
 
-      - name: Build Binary
-        run: go build -o monitor
+      - name: Build and Install Monitor
+        run: |
+          go build -o monitor
+          sudo mv monitor /usr/local/bin/
+          chmod +x /usr/local/bin/monitor
 
       - name: Install Docker and Docker Compose
         run: |
@@ -43,11 +46,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
+      - name: Set Up SSH Config for CI
+        run: |
+          mkdir -p ~/.ssh
+          echo "Host localhost" >> ~/.ssh/config
+          echo "    HostName localhost" >> ~/.ssh/config
+          echo "    User root" >> ~/.ssh/config
+          echo "    IdentityFile /tmp/ci_ssh_key" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          ssh-keygen -t rsa -b 2048 -f /tmp/ci_ssh_key -q -N ""
+          cat /tmp/ci_ssh_key.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          ssh-keyscan localhost >> ~/.ssh/known_hosts
 
-      - name: Start Docker Containers for Testing
+      - name: Start Local Docker Containers for Testing
         run: docker compose -f docker-compose.yml up -d
 
-      - name: Wait for Containers to Initialize
+      - name: Wait for Local Containers to Initialize
         run: sleep 10  # Ensure services are fully started
 
       - name: Run Installation Script
@@ -62,6 +77,10 @@ jobs:
           echo "🔄 Testing monitor --state"
           monitor state || { echo "❌ monitor state failed"; exit 1; }
 
+      - name: Test Monitor Remote Functionality
+        run: |
+          echo "🔄 Testing monitor remote --host localhost"
+          /usr/local/bin/monitor remote --host localhost || { echo "❌ monitor remote failed"; exit 1; }
 
       - name: Stop and Clean Up Docker Containers
         run: docker compose down

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -77,19 +78,29 @@ func fullStatus(c *cli.Context) error {
 
 // Remote Monitoring Functions
 func getSSHConfig(host string) (*ssh.ClientConfig, string, error) {
-	sshKnownHostsPath := os.Getenv("HOME") + "/.ssh/known_hosts"
+	// Define paths
+	sshConfigPath := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
+	sshKnownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
 
+	// Check if the SSH config file exists
+	if _, err := os.Stat(sshConfigPath); os.IsNotExist(err) {
+		return nil, "", fmt.Errorf("SSH config file not found at %s. Please create it or provide the private key with -i.", sshConfigPath)
+	}
+
+	// Use `ssh -G <host>` to parse the config for the host
 	cmd := exec.Command("ssh", "-G", host)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to retrieve host config: %v", err)
 	}
 
+	// Parse the output from `ssh -G`
 	sshArgs := parseSSHConfigOutput(output)
 	if sshArgs["hostname"] == "" {
 		return nil, "", fmt.Errorf("hostname not found in SSH config")
 	}
 
+	// Parse and validate retrieved parameters
 	hostname := sshArgs["hostname"]
 	port := sshArgs["port"]
 	keyPath := sshArgs["identityfile"]
@@ -98,16 +109,19 @@ func getSSHConfig(host string) (*ssh.ClientConfig, string, error) {
 		return nil, "", fmt.Errorf("could not read private key: %v", err)
 	}
 
+	// Parse the private key
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
 		return nil, "", fmt.Errorf("could not parse private key: %v", err)
 	}
 
+	// Load the known hosts file
 	hostKeyCallback, err := knownhosts.New(sshKnownHostsPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("could not load known hosts file: %v", err)
 	}
 
+	// Create the SSH client configuration
 	clientConfig := &ssh.ClientConfig{
 		User:            sshArgs["user"],
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},

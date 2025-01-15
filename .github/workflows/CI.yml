@@ -64,11 +64,6 @@ jobs:
 
           echo "Docker host setup complete. Use ssh -i /tmp/ci_ssh_key localhost to connect."
 
-      - name: Test Monitor Remote Functionality
-        run: |
-          echo "🔄 Testing monitor remote --host localhost"
-          monitor remote --host localhost || { echo "❌ monitor remote failed"; exit 1; }
-
       - name: Run Installation Script
         run: |
           python3 install.py
@@ -80,6 +75,11 @@ jobs:
 
           echo "🔄 Testing monitor --state"
           monitor state || { echo "❌ monitor state failed"; exit 1; }
+
+      - name: Test Monitor Remote Functionality
+        run: |
+          echo "🔄 Testing monitor remote --host localhost"
+          monitor remote --host localhost || { echo "❌ monitor remote failed"; exit 1; }
 
       - name: Stop and Clean Up Docker Containers
         run: docker compose down

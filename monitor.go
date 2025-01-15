@@ -1,20 +1,26 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/urfave/cli/v2"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-// Retrieves a list of running Docker containers
+// Global Docker host (default is local)
+var dockerHost = "unix:///var/run/docker.sock"
+
+// Local Monitoring Functions (unchanged from your current implementation)
 func getRunningContainers() []string {
-	out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
+	cmd := exec.Command("docker", "-H", dockerHost, "ps", "--format", "{{.Names}}")
+	out, err := cmd.Output()
 	if err != nil {
 		log.Println("❌ Error fetching running containers:", err)
 		return nil
@@ -26,128 +32,117 @@ func getRunningContainers() []string {
 	return containers
 }
 
-// Retrieves the exposed ports for a given container
-func getContainerPorts(container string) (string, string) {
-	out, err := exec.Command("docker", "inspect", "-f", "{{range $p, $conf := .NetworkSettings.Ports}}{{$p}} {{end}}", container).Output()
+// Remote Monitoring Functions
+func getSSHConfig(host string) (*ssh.ClientConfig, string, error) {
+	sshConfigPath := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
+	sshKnownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
+
+	cmd := exec.Command("ssh", "-G", host)
+	output, err := cmd.Output()
 	if err != nil {
-		log.Println("❌ Error fetching ports for container:", container, err)
-		return "N/A", "N/A"
+		return nil, "", fmt.Errorf("failed to retrieve host config: %v", err)
 	}
-	ports := strings.Fields(strings.TrimSpace(string(out))) // Splitting safely
 
-	if len(ports) > 0 {
-		// Extract host and container ports
-		portMappingOut, _ := exec.Command("docker", "port", container).Output()
-		portMapping := strings.Split(strings.TrimSpace(string(portMappingOut)), "\n")
+	sshArgs := parseSSHConfigOutput(output)
+	if sshArgs["hostname"] == "" {
+		return nil, "", fmt.Errorf("hostname not found in SSH config")
+	}
 
-		if len(portMapping) > 0 {
-			portParts := strings.Fields(portMapping[0]) // Example: "80/tcp -> 0.0.0.0:8081"
-			if len(portParts) > 2 {
-				hostPort := strings.Split(portParts[2], ":")[1] // Extract 8081
-				return ports[0], hostPort
-			}
+	hostname := sshArgs["hostname"]
+	port := sshArgs["port"]
+	keyPath := sshArgs["identityfile"]
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("could not read private key: %v", err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("could not parse private key: %v", err)
+	}
+
+	hostKeyCallback, err := knownhosts.New(sshKnownHostsPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("could not load known hosts file: %v", err)
+	}
+
+	clientConfig := &ssh.ClientConfig{
+		User:            sshArgs["user"],
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: hostKeyCallback,
+	}
+
+	return clientConfig, fmt.Sprintf("%s:%s", hostname, port), nil
+}
+
+func parseSSHConfigOutput(output []byte) map[string]string {
+	lines := bytes.Split(output, []byte("\n"))
+	config := make(map[string]string)
+	for _, line := range lines {
+		parts := bytes.Fields(line)
+		if len(parts) == 2 {
+			config[string(parts[0])] = string(parts[1])
 		}
-		return ports[0], "Unknown"
 	}
-
-	return "N/A", "N/A"
+	return config
 }
 
-// Checks if the service inside the container is available
-func checkService(port string) bool {
-	url := fmt.Sprintf("http://localhost:%s", port)
-	client := http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(url)
+func runRemoteCommand(clientConfig *ssh.ClientConfig, host string, command string) (string, error) {
+	client, err := ssh.Dial("tcp", host, clientConfig)
 	if err != nil {
-		return false
+		return "", fmt.Errorf("failed to connect to remote host: %v", err)
 	}
-	defer resp.Body.Close()
-	return resp.StatusCode == 200
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("failed to create SSH session: %v", err)
+	}
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	err = session.Run(command)
+	if err != nil {
+		return "", fmt.Errorf("command failed: %v (stderr: %s)", err, stderr.String())
+	}
+
+	return stdout.String(), nil
 }
 
-// Displays full container and service status
-func fullStatus(c *cli.Context) error {
-	// Separator line before printing new results
-	fmt.Println("\n--------------------------------------")
-	fmt.Println("🔄 Checking container and service status...")
-	fmt.Println("--------------------------------------\n")
+func remoteStatus(c *cli.Context) error {
+	host := c.String("host")
+	if host == "" {
+		log.Fatal("❌ Missing required argument: --host <hostalias>")
+	}
 
-	containers := getRunningContainers()
-	if len(containers) == 0 {
-		fmt.Println("❌ No running containers found!")
+	clientConfig, remoteAddress, err := getSSHConfig(host)
+	if err != nil {
+		log.Fatalf("❌ Failed to load SSH config: %v", err)
+	}
+
+	fmt.Printf("🔄 Connecting to %s (%s)...\n", host, remoteAddress)
+
+	command := "docker ps --format '{{.Names}}'"
+	output, err := runRemoteCommand(clientConfig, remoteAddress, command)
+	if err != nil {
+		log.Printf("❌ Error fetching containers: %v\n", err)
 		return nil
 	}
 
+	containers := strings.Split(strings.TrimSpace(output), "\n")
+	fmt.Println("📦 Remote Docker Containers:")
 	for _, container := range containers {
-		containerPort, hostPort := getContainerPorts(container)
-		serviceRunning := containerPort != "N/A" && checkService(hostPort)
-
-		fmt.Printf("📌 %s: Container - 🟢 Running, Service Port - %s, Host Port - %s, Service - %v\n",
-			container,
-			containerPort,
-			hostPort,
-			map[bool]string{true: "🟢 Available", false: "🔴 Unavailable"}[serviceRunning],
-		)
+		if container != "" {
+			fmt.Printf("📌 %s: 🟢 Running\n", container)
+		}
 	}
 
 	return nil
 }
 
-// Displays only container state
-func stateOnly(c *cli.Context) error {
-	fmt.Println("\n--------------------------------------")
-	fmt.Println("🔄 Checking container states...")
-	fmt.Println("--------------------------------------\n")
-
-	containers := getRunningContainers()
-	if len(containers) == 0 {
-		fmt.Println("❌ No running containers found!")
-		return nil
-	}
-
-	for _, container := range containers {
-		fmt.Printf("📌 %s: 🟢 Running\n", container)
-	}
-	return nil
-}
-
-// Displays only service availability
-func serviceOnly(c *cli.Context) error {
-	fmt.Println("\n--------------------------------------")
-	fmt.Println("🔄 Checking service availability...")
-	fmt.Println("--------------------------------------\n")
-
-	containers := getRunningContainers()
-	if len(containers) == 0 {
-		fmt.Println("❌ No running containers found!")
-		return nil
-	}
-
-	for _, container := range containers {
-		containerPort, hostPort := getContainerPorts(container)
-		serviceRunning := containerPort != "N/A" && checkService(hostPort)
-
-		fmt.Printf("📌 %s: Service Port - %s, Host Port - %s, Service - %v\n",
-			container,
-			containerPort,
-			hostPort,
-			map[bool]string{true: "🟢 Available", false: "🔴 Unavailable"}[serviceRunning],
-		)
-	}
-
-	return nil
-}
-
-// Runs the monitor tool as a continuous systemd service
-func runAsService() {
-	fmt.Println("🚀 Starting Monitor Service...")
-
-	for {
-		fullStatus(nil)
-		time.Sleep(10 * time.Second)
-	}
-}
-
+// Main Application with CLI Commands
 func main() {
 	app := &cli.App{
 		Name:  "monitor",
@@ -163,17 +158,23 @@ func main() {
 				Usage:  "Displays only the status of services",
 				Action: serviceOnly,
 			},
+			{
+				Name:  "remote",
+				Usage: "Monitor Docker containers on a remote host via SSH",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "host",
+						Usage: "Host alias or address (from SSH config or manual)",
+					},
+				},
+				Action: remoteStatus,
+			},
 		},
 		Action: fullStatus,
 	}
 
-	// If no arguments are given, assume it's running as a systemd service
-	if len(os.Args) > 1 {
-		err := app.Run(os.Args)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		runAsService()
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
 	}
 }

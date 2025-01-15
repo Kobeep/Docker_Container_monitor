@@ -2,7 +2,7 @@
 
 ## CI/CD Status 🚀
 
-![GitHub Workflow Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/go-container-monitor.yml/badge.svg)
+![GitHub Workflow Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/CICD.yml/badge.svg)
 
 ## Overview
 

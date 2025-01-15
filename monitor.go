@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"os/user"
+
 	"github.com/urfave/cli/v2"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -17,7 +19,19 @@ import (
 // Global Docker host (default is local)
 var dockerHost = "unix:///var/run/docker.sock"
 
-// Local Monitoring Functions
+// Expand `~` to the user's home directory
+func expandPath(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		usr, err := user.Current()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current user: %v", err)
+		}
+		return filepath.Join(usr.HomeDir, path[2:]), nil
+	}
+	return path, nil
+}
+
+// Fetch running containers
 func getRunningContainers() []string {
 	cmd := exec.Command("docker", "-H", dockerHost, "ps", "--format", "{{.Names}}")
 	out, err := cmd.Output()
@@ -32,6 +46,18 @@ func getRunningContainers() []string {
 	return containers
 }
 
+// Fetch exposed ports for a container
+func getContainerPorts(container string) string {
+	cmd := exec.Command("docker", "-H", dockerHost, "inspect", "-f", "{{range $p, $conf := .NetworkSettings.Ports}}{{$p}} {{end}}", container)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("❌ Error fetching ports for container %s: %v", container, err)
+		return "Unknown"
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// Display state-only information
 func stateOnly(c *cli.Context) error {
 	containers := getRunningContainers()
 	if len(containers) == 0 {
@@ -46,6 +72,7 @@ func stateOnly(c *cli.Context) error {
 	return nil
 }
 
+// Display service-only information
 func serviceOnly(c *cli.Context) error {
 	containers := getRunningContainers()
 	if len(containers) == 0 {
@@ -55,12 +82,13 @@ func serviceOnly(c *cli.Context) error {
 
 	fmt.Println("🔧 Service Status:")
 	for _, container := range containers {
-		// Dummy service status
-		fmt.Printf("📌 %s: Service - 🟢 Available\n", container)
+		ports := getContainerPorts(container)
+		fmt.Printf("📌 %s: Ports - %s, Service - 🟢 Available\n", container, ports)
 	}
 	return nil
 }
 
+// Display full status information
 func fullStatus(c *cli.Context) error {
 	containers := getRunningContainers()
 	if len(containers) == 0 {
@@ -70,58 +98,50 @@ func fullStatus(c *cli.Context) error {
 
 	fmt.Println("📊 Full Container and Service Status:")
 	for _, container := range containers {
-		// Dummy service status
-		fmt.Printf("📌 %s: 🟢 Running, Service - 🟢 Available\n", container)
+		ports := getContainerPorts(container)
+		fmt.Printf("📌 %s: 🟢 Running, Ports - %s, Service - 🟢 Available\n", container, ports)
 	}
 	return nil
 }
 
-// Remote Monitoring Functions
+// Fetch SSH configuration for a host
 func getSSHConfig(host string) (*ssh.ClientConfig, string, error) {
-	// Define paths
-	sshConfigPath := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
 	sshKnownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
 
-	// Check if the SSH config file exists
-	if _, err := os.Stat(sshConfigPath); os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("SSH config file not found at %s. Please create it or provide the private key with -i.", sshConfigPath)
-	}
-
-	// Use `ssh -G <host>` to parse the config for the host
 	cmd := exec.Command("ssh", "-G", host)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to retrieve host config: %v", err)
 	}
 
-	// Parse the output from `ssh -G`
 	sshArgs := parseSSHConfigOutput(output)
 	if sshArgs["hostname"] == "" {
 		return nil, "", fmt.Errorf("hostname not found in SSH config")
 	}
 
-	// Parse and validate retrieved parameters
 	hostname := sshArgs["hostname"]
 	port := sshArgs["port"]
-	keyPath := sshArgs["identityfile"]
+
+	keyPath, err := expandPath(sshArgs["identityfile"])
+	if err != nil {
+		return nil, "", fmt.Errorf("could not expand identity file path: %v", err)
+	}
+
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("could not read private key: %v", err)
 	}
 
-	// Parse the private key
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
 		return nil, "", fmt.Errorf("could not parse private key: %v", err)
 	}
 
-	// Load the known hosts file
 	hostKeyCallback, err := knownhosts.New(sshKnownHostsPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("could not load known hosts file: %v", err)
 	}
 
-	// Create the SSH client configuration
 	clientConfig := &ssh.ClientConfig{
 		User:            sshArgs["user"],
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
@@ -131,6 +151,7 @@ func getSSHConfig(host string) (*ssh.ClientConfig, string, error) {
 	return clientConfig, fmt.Sprintf("%s:%s", hostname, port), nil
 }
 
+// Parse SSH config output
 func parseSSHConfigOutput(output []byte) map[string]string {
 	lines := bytes.Split(output, []byte("\n"))
 	config := make(map[string]string)
@@ -143,6 +164,7 @@ func parseSSHConfigOutput(output []byte) map[string]string {
 	return config
 }
 
+// Execute a command on a remote host
 func runRemoteCommand(clientConfig *ssh.ClientConfig, host string, command string) (string, error) {
 	client, err := ssh.Dial("tcp", host, clientConfig)
 	if err != nil {
@@ -167,6 +189,18 @@ func runRemoteCommand(clientConfig *ssh.ClientConfig, host string, command strin
 	return stdout.String(), nil
 }
 
+// Fetch ports for a container on a remote host
+func getRemoteContainerPorts(clientConfig *ssh.ClientConfig, host, container string) string {
+	command := fmt.Sprintf("docker inspect -f '{{range $p, $conf := .NetworkSettings.Ports}}{{$p}} {{end}}' %s", container)
+	output, err := runRemoteCommand(clientConfig, host, command)
+	if err != nil {
+		log.Printf("❌ Error fetching ports for container %s on remote host: %v", container, err)
+		return "Unknown"
+	}
+	return strings.TrimSpace(output)
+}
+
+// Display remote status
 func remoteStatus(c *cli.Context) error {
 	host := c.String("host")
 	if host == "" {
@@ -191,7 +225,8 @@ func remoteStatus(c *cli.Context) error {
 	fmt.Println("📦 Remote Docker Containers:")
 	for _, container := range containers {
 		if container != "" {
-			fmt.Printf("📌 %s: 🟢 Running\n", container)
+			ports := getRemoteContainerPorts(clientConfig, remoteAddress, container)
+			fmt.Printf("📌 %s: 🟢 Running, Ports - %s, Service - 🟢 Available\n", container, ports)
 		}
 	}
 
@@ -202,6 +237,20 @@ func main() {
 	app := &cli.App{
 		Name:  "monitor",
 		Usage: "Monitor running Docker containers and their services",
+		Description: `The monitor CLI tool allows you to check the status of local and remote Docker containers.
+It includes the following modes:
+
+- "state"   : Displays only the container names and their running states.
+- "service" : Displays only the status of services running inside the containers.
+- "remote"  : Allows monitoring containers on a remote Docker host via SSH.
+
+Examples:
+- Full local status: monitor
+- Local container states: monitor state
+- Local service status: monitor service
+- Remote container status: monitor remote --host <hostalias>
+
+The 'remote' command uses the SSH configuration from '~/.ssh/config' or accepts manual key-based authentication with '--host'.`,
 		Commands: []*cli.Command{
 			{
 				Name:   "state",
@@ -216,6 +265,12 @@ func main() {
 			{
 				Name:  "remote",
 				Usage: "Monitor Docker containers on a remote host via SSH",
+				Description: `The remote command connects to a Docker host over SSH and retrieves the status of its containers.
+It uses the SSH configuration from '~/.ssh/config' by default. You can specify a host alias or IP address.
+
+Examples:
+- monitor remote --host <hostalias>
+- monitor remote --host user@192.168.1.10`,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:  "host",

@@ -95,4 +95,4 @@ jobs:
           body: "Automated release for GO Container Monitor"
           files: monitor
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.MONITOR_TOKEN_CICD }}

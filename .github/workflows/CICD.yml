@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: monitor-binary
-          path: monitor
+          path: /usr/local/bin/monitor
 
   release:
     name: Create GitHub Release

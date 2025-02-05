@@ -1,4 +1,4 @@
-# Docker_Container_monitor🚀
+# Docker_Container_monitor 🚀
 
 ## CI/CD Status 🚀
 
@@ -6,12 +6,13 @@
 
 ## Overview
 
-`Docker_Container_monitor` is a lightweight CLI tool written in `Go` that helps monitor running Docker containers and their services. It provides real-time information about container states and checks if the services inside the containers are available. The project includes a `Python` installer script to automate the setup process.
+`Docker_Container_monitor` is a lightweight CLI tool written in `Go` that helps monitor running Docker containers and their services. It provides real-time information about container states and checks if the services inside the containers are available. The project includes a `Python` installer script to automate the setup process and supports monitoring remote Docker hosts via SSH.
 
 ## Features
 
 - ✅ **Automatic container detection** - No need to manually specify container names.
 - ✅ **Service health check** - Verifies if the services inside containers are accessible.
+- ✅ **Remote monitoring support** - Monitor Docker containers on remote hosts over SSH.
 - ✅ **Multiple output modes** - Choose between full status, container state, or service availability.
 - ✅ **Simple CLI commands** - Use `monitor` to get an instant overview.
 - ✅ **Systemd integration** - Runs as a background service to keep monitoring automatically.
@@ -24,6 +25,10 @@
 - 🐳 Docker installed and running
 - 🐍 Python3 installed
 - 🦫 Go installed (if not, the installer will install it automatically)
+- 🔑 **(Optional)** SSH access set up for remote monitoring:
+  - A configured `~/.ssh/config` file, or
+  - A private key for manual SSH authentication.
+
 
 ### Steps to Install
 
@@ -63,6 +68,12 @@ monitor state
 
 ```sh
 monitor service
+```
+
+### Monitor Docker containers on a remote host:
+
+```sh
+monitor remote --host <hostalias>
 ```
 
 ### Check systemd service status:

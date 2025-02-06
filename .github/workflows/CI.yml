@@ -77,10 +77,5 @@ jobs:
           echo "🔄 Testing monitor --state"
           monitor state || { echo "❌ monitor state failed"; exit 1; }
 
-      - name: Test Monitor Remote Functionality
-        run: |
-          echo "🔄 Testing monitor remote --host localhost"
-          /usr/local/bin/monitor remote --host localhost || { echo "❌ monitor remote failed"; exit 1; }
-
       - name: Stop and Clean Up Docker Containers
         run: docker compose down

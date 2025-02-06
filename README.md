@@ -1,43 +1,79 @@
-# Docker_Container_monitor 🚀
+# Docker Container Monitor 🚀
 
-## CI/CD Status 🚀
+[![CI/CD Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/CICD.yml/badge.svg)](https://github.com/Kobeep/Docker_Container_monitor/actions)
 
-![GitHub Workflow Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/CICD.yml/badge.svg)
+Docker Container Monitor is a lightweight CLI tool written in Go that monitors running Docker containers and their services. It provides real-time information about container states, checks service availability, and even supports remote monitoring via SSH. The project also includes a Python installer script for an automated setup.
+
+---
+
+## Table of Contents
+
+- [Docker Container Monitor 🚀](#docker-container-monitor-)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Installation](#installation)
+    - [Prerequisites](#prerequisites)
+    - [Steps to Install](#steps-to-install)
+  - [Usage](#usage)
+    - [Display full container and service status:](#display-full-container-and-service-status)
+    - [Display only container states:](#display-only-container-states)
+    - [Display only service availability:](#display-only-service-availability)
+    - [Monitor Docker containers on a remote host:](#monitor-docker-containers-on-a-remote-host)
+    - [Check systemd service status:](#check-systemd-service-status)
+  - [How It Works](#how-it-works)
+  - [Uninstallation](#uninstallation)
+  - [Contributing](#contributing)
+  - [License](#license)
+  - [Author](#author)
+  - [GitHub](#github)
+
+---
 
 ## Overview
 
-`Docker_Container_monitor` is a lightweight CLI tool written in `Go` that helps monitor running Docker containers and their services. It provides real-time information about container states and checks if the services inside the containers are available. The project includes a `Python` installer script to automate the setup process and supports monitoring remote Docker hosts via SSH.
+**Docker Container Monitor** is a powerful yet lightweight CLI tool designed to help you keep an eye on your Docker containers and the services running within them. With features ranging from automatic container detection to remote monitoring support via SSH, this tool makes it easy to ensure that your containerized applications are running smoothly.
+
+---
 
 ## Features
 
-- ✅ **Automatic container detection** - No need to manually specify container names.
-- ✅ **Service health check** - Verifies if the services inside containers are accessible.
-- ✅ **Remote monitoring support** - Monitor Docker containers on remote hosts over SSH.
-- ✅ **Multiple output modes** - Choose between full status, container state, or service availability.
-- ✅ **Simple CLI commands** - Use `monitor` to get an instant overview.
-- ✅ **Systemd integration** - Runs as a background service to keep monitoring automatically.
-- ✅ **Easy installation** - Fully automated setup with `install.py`.
+- ✅ **Automatic container detection**
+  No manual container naming needed.
+- ✅ **Service health check**
+  Automatically verifies the accessibility of container services.
+- ✅ **Remote monitoring support**
+  Monitor containers on remote hosts over SSH.
+- ✅ **Multiple output modes**
+  Choose from full status, container state, or service availability displays.
+- ✅ **Simple CLI commands**
+  Use `monitor` for an instant overview.
+- ✅ **Systemd integration**
+  Run as a background service for continuous monitoring.
+- ✅ **Easy installation**
+  Fully automated setup with `install.py`.
+
+---
 
 ## Installation
 
 ### Prerequisites
 
-- 🐳 Docker installed and running
-- 🐍 Python3 installed
-- 🦫 Go installed (if not, the installer will install it automatically)
-- 🔑 **(Optional)** SSH access set up for remote monitoring:
+- 🐳 **Docker** installed and running.
+- 🐍 **Python 3** installed.
+- 🦫 **Go** installed (the installer will install it automatically if not present).
+- 🔑 **(Optional)** SSH access for remote monitoring:
   - A configured `~/.ssh/config` file, or
   - A private key for manual SSH authentication.
 
-
 ### Steps to Install
 
-1. **Clone the repository**:
+1. **Clone the repository:**
 
-```sh
-git clone https://github.com/yourusername/Docker_Container_monitor.git
-cd Docker_Container_monitor
-```
+  ```sh
+  git clone https://github.com/Kobeep/Docker_Container_monitor.git
+  cd Docker_Container_monitor
+  ```
 
 2. **Run the installation script:**
 

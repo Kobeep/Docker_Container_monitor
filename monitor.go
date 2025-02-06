@@ -114,21 +114,27 @@ func remoteStatus(c *cli.Context) error {
 
 // Executes docker status locally
 func executeLocalDockerStatus(args ...string) error {
+	// Create the docker ps command with the specified format
 	cmd := exec.Command("docker", append([]string{"ps", "--format", "📦 {{.Names}} | 🔹 {{.Status}} | 🔍 {{.Ports}}"}, args...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("❌ docker ps failed: %v\n%s", err, string(output))
 	}
-	fmt.Printf("📦 Local Containers:\n%s", string(output))
+	trimmedOutput := strings.TrimSpace(string(output))
+	if trimmedOutput == "" {
+		// If the result is empty, inform that no running containers were found
+		fmt.Println("❌ No running containers found!")
+	} else {
+		fmt.Printf("📦 Local Containers:\n%s\n", trimmedOutput)
+	}
 	return nil
 }
 
 // Checks local service availability
-// Checks local service availability
 func executeLocalServiceCheck() error {
 	fmt.Println("🔍 Checking services on ports...")
 
-	// Get the list of running containers and their exposed ports
+	// Retrieve the list of running containers and their ports
 	cmd := exec.Command("docker", "ps", "--format", "{{.Names}}: {{.Ports}}")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -136,7 +142,7 @@ func executeLocalServiceCheck() error {
 	}
 
 	lines := strings.Split(string(output), "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+	if len(lines) == 0 || (len(lines) == 1 && strings.TrimSpace(lines[0]) == "") {
 		fmt.Println("❌ No running containers found!")
 		return nil
 	}
@@ -160,7 +166,12 @@ func executeLocalServiceCheck() error {
 				continue
 			}
 
-			hostPort := strings.Split(portParts[0], ":")[1] // Extract host port
+			// Extract the host port from the first part of portInfo
+			hostPortParts := strings.Split(portParts[0], ":")
+			if len(hostPortParts) < 2 {
+				continue
+			}
+			hostPort := hostPortParts[1]
 			serviceURL := fmt.Sprintf("http://localhost:%s", hostPort)
 
 			// Check service availability using curl
@@ -183,7 +194,6 @@ func executeLocalServiceCheck() error {
 	return nil
 }
 
-
 // Execute docker status on a remote host
 func executeRemoteDockerStatus(config *ssh.ClientConfig, remoteAddress string) error {
 	client, err := ssh.Dial("tcp", remoteAddress, config)
@@ -204,7 +214,13 @@ func executeRemoteDockerStatus(config *ssh.ClientConfig, remoteAddress string) e
 		return fmt.Errorf("❌ Failed to run docker ps on %s: %v", remoteAddress, err)
 	}
 
-	fmt.Printf("📦 Remote Containers:\n%s", b.String())
+	trimmedOutput := strings.TrimSpace(b.String())
+	if trimmedOutput == "" {
+		// If the output is empty, inform that no running containers were found on the remote host
+		fmt.Println("❌ No running containers found on remote host!")
+	} else {
+		fmt.Printf("📦 Remote Containers:\n%s\n", trimmedOutput)
+	}
 	return nil
 }
 

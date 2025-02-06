@@ -58,17 +58,23 @@ monitor --help
 monitor
 ```
 
+![monitor](./readme/monitor.png)
+
 ### Display only container states:
 
 ```sh
 monitor state
 ```
 
+![monitor](./readme/monitor-state.png)
+
 ### Display only service availability:
 
 ```sh
 monitor service
 ```
+
+![monitor](./readme/monitor-service.png)
 
 ### Monitor Docker containers on a remote host:
 

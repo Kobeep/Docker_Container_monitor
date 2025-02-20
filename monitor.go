@@ -17,8 +17,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/kevinburke/ssh_config"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type ServiceCheckResult struct {
@@ -244,21 +242,26 @@ func executeLocalServiceCheck(ctx context.Context, useJSON bool) error {
 		if line == "" {
 			continue
 		}
+
 		parts := strings.Split(line, ": ")
 		if len(parts) != 2 {
 			continue
 		}
+
 		container := parts[0]
 		ports := strings.Split(parts[1], ", ")
+    
 		for _, portInfo := range ports {
 			portParts := strings.Split(portInfo, "->")
 			if len(portParts) != 2 {
 				continue
 			}
+
 			hostPortParts := strings.Split(portParts[0], ":")
 			if len(hostPortParts) < 2 {
 				continue
 			}
+
 			port := hostPortParts[1]
 			url := fmt.Sprintf("http://localhost:%s", port)
 			wg.Add(1)
@@ -308,6 +311,8 @@ func executeLocalServiceCheck(ctx context.Context, useJSON bool) error {
 		}
 		color.Green("Service check completed.")
 	}
+
+	fmt.Println("✅ Service check completed successfully.")
 	return nil
 }
 
@@ -357,6 +362,7 @@ func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, ad
 	return nil
 }
 
+
 // Get SSH config from ~/.ssh/config
 func getSSHConfig(alias string) (*ssh.ClientConfig, string, error) {
 	path := os.ExpandEnv("$HOME/.ssh/config")
@@ -373,7 +379,9 @@ func getSSHConfig(alias string) (*ssh.ClientConfig, string, error) {
 
 	hostname, err := cfg.Get(alias, "HostName")
 	if err != nil || hostname == "" {
+
 		return nil, "", fmt.Errorf("HostName not found for %s", alias)
+
 	}
 
 	user, err := cfg.Get(alias, "User")
@@ -446,6 +454,8 @@ func getManualSSHConfig(userHost, keyPath string) (*ssh.ClientConfig, string, er
 	if err != nil {
 		return nil, "", fmt.Errorf("Host key callback error: %v", err)
 	}
+	user := parts[0]
+	host := parts[1]
 
 	clientConfig := &ssh.ClientConfig{
 		User:            user,
@@ -457,7 +467,6 @@ func getManualSSHConfig(userHost, keyPath string) (*ssh.ClientConfig, string, er
 	return clientConfig, fmt.Sprintf("%s:22", host), nil
 }
 
-// Expand ~ in path
 func expandPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()

@@ -20,6 +20,8 @@ Docker Container Monitor is a lightweight CLI tool written in Go that monitors r
     - [Display only container states:](#display-only-container-states)
     - [Display only service availability:](#display-only-service-availability)
     - [Monitor Docker containers on a remote host:](#monitor-docker-containers-on-a-remote-host)
+    - [Monitor Docker events in real time:](#monitor-docker-events-in-real-time)
+      - [For JSON output, use:](#for-json-output-use)
     - [Check systemd service status:](#check-systemd-service-status)
   - [How It Works](#how-it-works)
   - [Uninstallation](#uninstallation)
@@ -44,8 +46,10 @@ Docker Container Monitor is a lightweight CLI tool written in Go that monitors r
   Automatically verifies the accessibility of container services.
 - ✅ **Remote monitoring support**
   Monitor containers on remote hosts over SSH.
+- ✅ **Real-time Docker events monitoring**
+  Subscribe to Docker events for dynamic updates.
 - ✅ **Multiple output modes**
-  Choose from full status, container state, or service availability displays.
+  Choose from full status, container state, service availability, or event monitoring displays.
 - ✅ **Simple CLI commands**
   Use `monitor` for an instant overview.
 - ✅ **Systemd integration**
@@ -118,16 +122,30 @@ monitor service
 monitor remote --host <hostalias>
 ```
 
+### Monitor Docker events in real time:
+
+```sh
+monitor events
+```
+
+#### For JSON output, use:
+
+```sh
+monitor events --json
+```
+
 ### Check systemd service status:
 
 ```sh
 systemctl status monitor
 ```
+
 ## How It Works
 
 🚀 **Retrieves a list of running Docker containers** using `docker ps`
 🔌 **Gets exposed ports** for each container
 🌐 **Attempts an HTTP request** to determine if the service inside the container is responsive
+🔔 **Subscribes to Docker events** for real-time monitoring.
 📊 **Displays results** based on the selected mode
 
 ## Uninstallation

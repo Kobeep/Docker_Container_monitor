@@ -1,21 +1,15 @@
-module monitor.go
+module monitor
 
 go 1.22.10
 
 require (
-	github.com/docker/docker v20.10.21+incompatible
+	github.com/docker/docker v20.10.24+incompatible
 	github.com/fatih/color v1.18.0
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/urfave/cli/v2 v2.27.5
 	golang.org/x/crypto v0.32.0
-)
-
-replace github.com/docker/distribution => github.com/docker/distribution v2.7.1+incompatible
-
-require (
 	github.com/Microsoft/go-winio v0.4.14 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
-	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -29,8 +23,8 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
-	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
+replace github.com/docker/distribution => github.com/docker/distribution v2.7.1+incompatible

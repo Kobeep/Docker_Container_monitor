@@ -2,48 +2,52 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
-	"github.com/kevinburke/ssh_config"
+	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/fatih/color"
+	"github.com/kevinburke/ssh_config"
 	"github.com/urfave/cli/v2"
 )
 
 func main() {
 	app := &cli.App{
 		Name:  "monitor",
-		Usage: "🔍 Monitor running Docker containers and their services (local and remote)",
+		Usage: "Monitor Docker containers and services (local and remote)",
 		Commands: []*cli.Command{
 			{
 				Name:   "state",
-				Usage:  "📊 Displays only container names and their states",
+				Usage:  "Show container names and states",
 				Action: stateOnly,
 			},
 			{
 				Name:   "service",
-				Usage:  "🛑 Displays only the status of services",
+				Usage:  "Show service statuses",
 				Action: serviceOnly,
 			},
 			{
 				Name:  "remote",
-				Usage: "🚀 Monitor Docker containers on a remote host via SSH",
-				Description: `The remote command connects to a Docker host over SSH and retrieves the status of its containers.
-You can either:
-- 🔹 Use SSH config: monitor remote --host <hostalias>
-- 🔹 Use manual details: monitor remote <user>@<hostaddress> -i <sshkey>`,
+				Usage: "Monitor remote Docker via SSH",
+				Description: `Connect to a remote Docker host via SSH.
+Options:
+- Use SSH config: monitor remote --host <alias>
+- Use manual: monitor remote <user>@<host> -i <sshkey>`,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:  "host",
-						Usage: "🏠 Host alias from SSH config",
+						Usage: "SSH config alias",
 					},
 					&cli.StringFlag{
 						Name:  "i",
-						Usage: "🔐 Path to the SSH private key (used with manual host authentication)",
+						Usage: "Path to SSH private key",
 					},
 				},
 				Action: remoteStatus,
@@ -52,266 +56,272 @@ You can either:
 		Action: fullStatus,
 	}
 
-	err := app.Run(os.Args)
-	if err != nil {
-		log.Fatalf("❌ Application error: %v", err)
+	if err := app.Run(os.Args); err != nil {
+		color.Red("App error: %v", err)
+		os.Exit(1)
 	}
 }
 
-// Display full local status
+// Full local status
 func fullStatus(c *cli.Context) error {
-	fmt.Println("🔁 Checking local Docker containers and services...")
-	return executeLocalDockerStatus()
+	color.Cyan("Checking local Docker containers and services...")
+	return executeLocalDockerStatus(c.Context, []string{})
 }
 
-// Display only container states (local)
+// Local container states
 func stateOnly(c *cli.Context) error {
-	fmt.Println("🔍 Checking local container states...")
-	return executeLocalDockerStatus("--format", "📂 {{.Names}}: 🔹 {{.Status}}")
+	color.Cyan("Checking local container states...")
+	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"})
 }
 
-// Display only service status (local)
+// Local service check
 func serviceOnly(c *cli.Context) error {
-	fmt.Println("🛑 Checking local service availability...")
-	return executeLocalServiceCheck()
+	color.Cyan("Checking local service availability...")
+	return executeLocalServiceCheck(c.Context)
 }
 
-// Display remote status
+// Remote status via SSH
 func remoteStatus(c *cli.Context) error {
 	host := c.String("host")
 	args := c.Args()
 
 	if host != "" {
-		// Case 1: Using SSH Config with --host
 		clientConfig, remoteAddress, err := getSSHConfig(host)
 		if err != nil {
-			log.Fatalf("❌ Failed to load SSH config for host '%s': %v", host, err)
+			return fmt.Errorf("SSH config error for '%s': %v", host, err)
 		}
-
-		fmt.Printf("🚀 Connecting to %s (%s)...\n", host, remoteAddress)
-		return executeRemoteDockerStatus(clientConfig, remoteAddress)
+		color.Cyan("Connecting to %s (%s)...", host, remoteAddress)
+		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress)
 	} else if args.Len() > 0 {
-		// Case 2: Manual SSH Details with user@host and -i key
 		userHost := args.Get(0)
 		keyPath := c.String("i")
-
 		if keyPath == "" {
-			log.Fatal("❌ Missing required SSH key. Use -i <sshkey> to specify the key.")
+			return fmt.Errorf("Missing SSH key (-i <sshkey>)")
 		}
-
 		clientConfig, remoteAddress, err := getManualSSHConfig(userHost, keyPath)
 		if err != nil {
-			log.Fatalf("❌ Failed to create SSH config for '%s': %v", userHost, err)
+			return fmt.Errorf("SSH config error for '%s': %v", userHost, err)
 		}
-
-		fmt.Printf("🚀 Connecting to %s using provided SSH key...\n", remoteAddress)
-		return executeRemoteDockerStatus(clientConfig, remoteAddress)
+		color.Cyan("Connecting to %s with provided SSH key...", remoteAddress)
+		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress)
 	}
-
-	log.Fatal("❌ Missing required arguments. Use '--host <hostalias>' or '<user>@<hostaddress> -i <sshkey>'.")
-	return nil
+	return fmt.Errorf("Missing args. Use '--host <alias>' or '<user>@<host> -i <sshkey>'")
 }
 
-// Executes docker status locally
-func executeLocalDockerStatus(args ...string) error {
-	// Create the docker ps command with the specified format
-	cmd := exec.Command("docker", append([]string{"ps", "--format", "📦 {{.Names}} | 🔹 {{.Status}} | 🔍 {{.Ports}}"}, args...)...)
+// Run docker ps locally
+func executeLocalDockerStatus(ctx context.Context, args []string) error {
+	baseArgs := []string{"ps", "--format", "📦 {{.Names}} | 🔹 {{.Status}} | 🔍 {{.Ports}}"}
+	cmdArgs := append(baseArgs, args...)
+	cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ docker ps failed: %v\n%s", err, string(output))
+		return fmt.Errorf("docker ps failed: %v\n%s", err, string(output))
 	}
-	trimmedOutput := strings.TrimSpace(string(output))
-	if trimmedOutput == "" {
-		// If the result is empty, inform that no running containers were found
-		fmt.Println("❌ No running containers found!")
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		color.Yellow("No running containers found!")
 	} else {
-		fmt.Printf("📦 Local Containers:\n%s\n", trimmedOutput)
+		color.Green("Local Containers:")
+		fmt.Println(trimmed)
 	}
 	return nil
 }
 
-// Checks local service availability
-func executeLocalServiceCheck() error {
-	fmt.Println("🔍 Checking services on ports...")
-
-	// Retrieve the list of running containers and their ports
-	cmd := exec.Command("docker", "ps", "--format", "{{.Names}}: {{.Ports}}")
+// Check services concurrently
+func executeLocalServiceCheck(ctx context.Context) error {
+	color.Cyan("Checking services on ports...")
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}: {{.Ports}}")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ Failed to retrieve running containers: %v\n%s", err, string(output))
+		return fmt.Errorf("Failed to get containers: %v\n%s", err, string(output))
 	}
-
 	lines := strings.Split(string(output), "\n")
 	if len(lines) == 0 || (len(lines) == 1 && strings.TrimSpace(lines[0]) == "") {
-		fmt.Println("❌ No running containers found!")
+		color.Yellow("No running containers found!")
 		return nil
 	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-
 		parts := strings.Split(line, ": ")
 		if len(parts) != 2 {
 			continue
 		}
-
-		containerName := parts[0]
+		container := parts[0]
 		ports := strings.Split(parts[1], ", ")
-
 		for _, portInfo := range ports {
 			portParts := strings.Split(portInfo, "->")
 			if len(portParts) != 2 {
 				continue
 			}
-
-			// Extract the host port from the first part of portInfo
 			hostPortParts := strings.Split(portParts[0], ":")
 			if len(hostPortParts) < 2 {
 				continue
 			}
 			hostPort := hostPortParts[1]
-			serviceURL := fmt.Sprintf("http://localhost:%s", hostPort)
-
-			// Check service availability using curl
-			curlCmd := exec.Command("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", serviceURL)
-			curlOutput, err := curlCmd.Output()
-			if err != nil {
-				fmt.Printf("❌ %s on port %s is unreachable.\n", containerName, hostPort)
-			} else {
-				statusCode := strings.TrimSpace(string(curlOutput))
-				if statusCode == "200" {
-					fmt.Printf("✅ %s service is available on port %s.\n", containerName, hostPort)
+			url := fmt.Sprintf("http://localhost:%s", hostPort)
+			wg.Add(1)
+			go func(container, port, url string) {
+				defer wg.Done()
+				curlCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				curlCmd := exec.CommandContext(curlCtx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url)
+				out, err := curlCmd.Output()
+				mu.Lock()
+				defer mu.Unlock()
+				if err != nil {
+					color.Red("%s on port %s is unreachable.", container, port)
 				} else {
-					fmt.Printf("⚠️ %s service returned HTTP %s on port %s.\n", containerName, statusCode, hostPort)
+					code := strings.TrimSpace(string(out))
+					if code == "200" {
+						color.Green("%s service is available on port %s.", container, port)
+					} else {
+						color.Yellow("%s service returned HTTP %s on port %s.", container, code, port)
+					}
 				}
-			}
+			}(container, hostPort, url)
 		}
 	}
-
-	fmt.Println("✅ Service check completed successfully.")
+	wg.Wait()
+	color.Green("Service check completed.")
 	return nil
 }
 
-// Execute docker status on a remote host
-func executeRemoteDockerStatus(config *ssh.ClientConfig, remoteAddress string) error {
-	client, err := ssh.Dial("tcp", remoteAddress, config)
+// Run docker ps on remote host
+func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, addr string) error {
+	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
-		return fmt.Errorf("❌ Failed to connect to %s: %v", remoteAddress, err)
+		return fmt.Errorf("Failed to connect to %s: %v", addr, err)
 	}
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		return fmt.Errorf("❌ Failed to create session on %s: %v", remoteAddress, err)
+		return fmt.Errorf("Session error on %s: %v", addr, err)
 	}
 	defer session.Close()
 
 	var b bytes.Buffer
 	session.Stdout = &b
 	if err := session.Run("docker ps --format '📦 {{.Names}} | 🔹 {{.Status}} | 🔎 {{.Ports}}'"); err != nil {
-		return fmt.Errorf("❌ Failed to run docker ps on %s: %v", remoteAddress, err)
+		return fmt.Errorf("docker ps failed on %s: %v", addr, err)
 	}
-
-	trimmedOutput := strings.TrimSpace(b.String())
-	if trimmedOutput == "" {
-		// If the output is empty, inform that no running containers were found on the remote host
-		fmt.Println("❌ No running containers found on remote host!")
+	trimmed := strings.TrimSpace(b.String())
+	if trimmed == "" {
+		color.Yellow("No running containers on remote host!")
 	} else {
-		fmt.Printf("📦 Remote Containers:\n%s\n", trimmedOutput)
+		color.Green("Remote Containers:")
+		fmt.Println(trimmed)
 	}
 	return nil
 }
 
-// Fetch SSH configuration using alias from ~/.ssh/config
+// Get SSH config from ~/.ssh/config
 func getSSHConfig(alias string) (*ssh.ClientConfig, string, error) {
-	sshConfigPath := os.ExpandEnv("$HOME/.ssh/config")
-	configFile, err := os.Open(sshConfigPath)
+	path := os.ExpandEnv("$HOME/.ssh/config")
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Could not open SSH config file: %v", err)
+		return nil, "", fmt.Errorf("Cannot open SSH config: %v", err)
 	}
-	defer configFile.Close()
+	defer f.Close()
 
-	cfg, err := ssh_config.Decode(configFile)
+	cfg, err := ssh_config.Decode(f)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Failed to decode SSH config: %v", err)
+		return nil, "", fmt.Errorf("Decode error: %v", err)
 	}
 
 	hostname, err := cfg.Get(alias, "HostName")
 	if err != nil || hostname == "" {
-		return nil, "", fmt.Errorf("❌ Could not find HostName for %s in SSH config", alias)
+		return nil, "", fmt.Errorf("HostName not found for %s", alias)
 	}
 
 	user, err := cfg.Get(alias, "User")
 	if err != nil || user == "" {
-		user = os.Getenv("USER") // Default to current user if not specified
+		user = os.Getenv("USER")
 	}
 
 	keyPath, err := cfg.Get(alias, "IdentityFile")
 	if err != nil || keyPath == "" {
-		keyPath = os.ExpandEnv("$HOME/.ssh/id_rsa") // Default key
+		keyPath = os.ExpandEnv("$HOME/.ssh/id_rsa")
 	} else {
 		keyPath, err = expandPath(keyPath)
 		if err != nil {
-			return nil, "", fmt.Errorf("❌ Could not expand key path: %v", err)
+			return nil, "", fmt.Errorf("Key path error: %v", err)
 		}
 	}
 
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Could not read SSH private key at %s: %v", keyPath, err)
+		return nil, "", fmt.Errorf("Cannot read key at %s: %v", keyPath, err)
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Could not parse private key at %s: %v", keyPath, err)
+		return nil, "", fmt.Errorf("Cannot parse key at %s: %v", keyPath, err)
+	}
+
+	knownHostsFile := os.ExpandEnv("$HOME/.ssh/known_hosts")
+	hostKeyCallback, err := knownhosts.New(knownHostsFile)
+	if err != nil {
+		return nil, "", fmt.Errorf("Host key callback error: %v", err)
 	}
 
 	clientConfig := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
+		Timeout:         10 * time.Second,
 	}
 
 	return clientConfig, fmt.Sprintf("%s:22", hostname), nil
 }
 
-// Fetch SSH configuration manually using user@host and a private key
+// Get manual SSH config
 func getManualSSHConfig(userHost, keyPath string) (*ssh.ClientConfig, string, error) {
 	keyPath, err := expandPath(keyPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Could not expand key path: %v", err)
+		return nil, "", fmt.Errorf("Key path error: %v", err)
 	}
 
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Could not read SSH private key at %s: %v", keyPath, err)
+		return nil, "", fmt.Errorf("Cannot read key at %s: %v", keyPath, err)
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return nil, "", fmt.Errorf("❌ Could not parse private key at %s: %v", keyPath, err)
+		return nil, "", fmt.Errorf("Cannot parse key at %s: %v", keyPath, err)
 	}
 
-	// Split user and host (format: user@host)
 	parts := strings.Split(userHost, "@")
 	if len(parts) != 2 {
-		return nil, "", fmt.Errorf("❌ Invalid format for user@host: %s", userHost)
+		return nil, "", fmt.Errorf("Invalid user@host: %s", userHost)
 	}
 	user := parts[0]
 	host := parts[1]
 
+	knownHostsFile := os.ExpandEnv("$HOME/.ssh/known_hosts")
+	hostKeyCallback, err := knownhosts.New(knownHostsFile)
+	if err != nil {
+		return nil, "", fmt.Errorf("Host key callback error: %v", err)
+	}
+
 	clientConfig := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
+		Timeout:         10 * time.Second,
 	}
 
 	return clientConfig, fmt.Sprintf("%s:22", host), nil
 }
 
-// Expand ~ to the home directory
+// Expand ~ in path
 func expandPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()

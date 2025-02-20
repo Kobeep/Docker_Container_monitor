@@ -12,12 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
-
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/client"
 	"github.com/fatih/color"
 	"github.com/kevinburke/ssh_config"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type ServiceCheckResult struct {
@@ -29,7 +30,7 @@ type ServiceCheckResult struct {
 func main() {
 	app := &cli.App{
 		Name:  "monitor",
-		Usage: "Monitor Docker containers and services (local and remote)",
+		Usage: "Monitor Docker containers, services and events (local and remote)",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "json",
@@ -66,6 +67,11 @@ Options:
 				},
 				Action: remoteStatus,
 			},
+			{
+				Name:   "events",
+				Usage:  "Monitor Docker events in real time",
+				Action: dockerEvents,
+			},
 		},
 		Action: fullStatus,
 	}
@@ -76,7 +82,7 @@ Options:
 	}
 }
 
-// Full status (local)
+// Full local status
 func fullStatus(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -85,7 +91,7 @@ func fullStatus(c *cli.Context) error {
 	return executeLocalDockerStatus(c.Context, []string{}, useJSON)
 }
 
-// Container states (local)
+// Local container states
 func stateOnly(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -94,7 +100,7 @@ func stateOnly(c *cli.Context) error {
 	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"}, useJSON)
 }
 
-// Service check (local)
+// Local service check
 func serviceOnly(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -134,6 +140,47 @@ func remoteStatus(c *cli.Context) error {
 		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress, useJSON)
 	}
 	return fmt.Errorf("Missing args. Use '--host <alias>' or '<user>@<host> -i <sshkey>'")
+}
+
+// Monitor Docker events (local)
+func dockerEvents(c *cli.Context) error {
+	useJSON := c.Bool("json")
+	if !useJSON {
+		color.Cyan("Subscribing to Docker events... (press Ctrl+C to exit)")
+	}
+
+	cliDocker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("Docker client error: %v", err)
+	}
+	defer cliDocker.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	options := types.EventsOptions{}
+	msgChan, errChan := cliDocker.Events(ctx, options)
+
+	for {
+		select {
+		case event := <-msgChan:
+			if useJSON {
+				data, err := json.Marshal(event)
+				if err != nil {
+					return fmt.Errorf("JSON marshal error: %v", err)
+				}
+				fmt.Println(string(data))
+			} else {
+				fmt.Printf("Type: %s | Action: %s | Actor: %v | Time: %s\n",
+					event.Type,
+					event.Action,
+					event.Actor.Attributes,
+					time.Unix(event.Time, 0).Format(time.RFC3339))
+			}
+		case err := <-errChan:
+			return fmt.Errorf("Event error: %v", err)
+		}
+	}
 }
 
 // Run docker ps locally

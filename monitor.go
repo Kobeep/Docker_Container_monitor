@@ -17,6 +17,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/kevinburke/ssh_config"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type ServiceCheckResult struct {
@@ -80,7 +82,7 @@ Options:
 	}
 }
 
-// Full local status
+// fullStatus displays full local Docker container and service status.
 func fullStatus(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -89,7 +91,7 @@ func fullStatus(c *cli.Context) error {
 	return executeLocalDockerStatus(c.Context, []string{}, useJSON)
 }
 
-// Local container states
+// stateOnly displays only container states.
 func stateOnly(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -98,7 +100,7 @@ func stateOnly(c *cli.Context) error {
 	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"}, useJSON)
 }
 
-// Local service check
+// serviceOnly checks local service availability.
 func serviceOnly(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -107,7 +109,7 @@ func serviceOnly(c *cli.Context) error {
 	return executeLocalServiceCheck(c.Context, useJSON)
 }
 
-// Remote status via SSH
+// remoteStatus connects to a remote Docker host via SSH.
 func remoteStatus(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	host := c.String("host")
@@ -140,7 +142,7 @@ func remoteStatus(c *cli.Context) error {
 	return fmt.Errorf("Missing args. Use '--host <alias>' or '<user>@<host> -i <sshkey>'")
 }
 
-// Monitor Docker events (local)
+// dockerEvents subscribes to Docker events in real time.
 func dockerEvents(c *cli.Context) error {
 	useJSON := c.Bool("json")
 	if !useJSON {
@@ -181,7 +183,7 @@ func dockerEvents(c *cli.Context) error {
 	}
 }
 
-// Run docker ps locally
+// executeLocalDockerStatus runs "docker ps" locally.
 func executeLocalDockerStatus(ctx context.Context, args []string, useJSON bool) error {
 	if useJSON {
 		baseArgs := []string{"ps", "--format", "{{json .}}"}
@@ -214,7 +216,7 @@ func executeLocalDockerStatus(ctx context.Context, args []string, useJSON bool) 
 	return nil
 }
 
-// Check services using net/http
+// executeLocalServiceCheck checks services using HTTP.
 func executeLocalServiceCheck(ctx context.Context, useJSON bool) error {
 	if !useJSON {
 		color.Cyan("Checking services on ports...")
@@ -242,26 +244,21 @@ func executeLocalServiceCheck(ctx context.Context, useJSON bool) error {
 		if line == "" {
 			continue
 		}
-
 		parts := strings.Split(line, ": ")
 		if len(parts) != 2 {
 			continue
 		}
-
 		container := parts[0]
 		ports := strings.Split(parts[1], ", ")
-
 		for _, portInfo := range ports {
 			portParts := strings.Split(portInfo, "->")
 			if len(portParts) != 2 {
 				continue
 			}
-
 			hostPortParts := strings.Split(portParts[0], ":")
 			if len(hostPortParts) < 2 {
 				continue
 			}
-      
 			port := hostPortParts[1]
 			url := fmt.Sprintf("http://localhost:%s", port)
 			wg.Add(1)
@@ -311,12 +308,10 @@ func executeLocalServiceCheck(ctx context.Context, useJSON bool) error {
 		}
 		color.Green("Service check completed.")
 	}
-
-	fmt.Println("✅ Service check completed successfully.")
 	return nil
 }
 
-// Run docker ps on remote host via SSH
+// executeRemoteDockerStatus runs "docker ps" on a remote host via SSH.
 func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, addr string, useJSON bool) error {
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
@@ -362,10 +357,10 @@ func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, ad
 	return nil
 }
 
-// Get SSH config from ~/.ssh/config
+// getSSHConfig retrieves SSH configuration from ~/.ssh/config using an alias.
 func getSSHConfig(alias string) (*ssh.ClientConfig, string, error) {
-	path := os.ExpandEnv("$HOME/.ssh/config")
-	f, err := os.Open(path)
+	sshConfigPath := os.ExpandEnv("$HOME/.ssh/config")
+	f, err := os.Open(sshConfigPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("Cannot open SSH config: %v", err)
 	}
@@ -410,7 +405,6 @@ func getSSHConfig(alias string) (*ssh.ClientConfig, string, error) {
 	hostKeyCallback, err := knownhosts.New(knownHostsFile)
 	if err != nil {
 		return nil, "", fmt.Errorf("Host key callback error: %v", err)
-
 	}
 
 	clientConfig := &ssh.ClientConfig{
@@ -423,7 +417,7 @@ func getSSHConfig(alias string) (*ssh.ClientConfig, string, error) {
 	return clientConfig, fmt.Sprintf("%s:22", hostname), nil
 }
 
-// Get manual SSH config
+// getManualSSHConfig retrieves SSH configuration from a user@host string and key path.
 func getManualSSHConfig(userHost, keyPath string) (*ssh.ClientConfig, string, error) {
 	keyPath, err := expandPath(keyPath)
 	if err != nil {
@@ -452,8 +446,6 @@ func getManualSSHConfig(userHost, keyPath string) (*ssh.ClientConfig, string, er
 	if err != nil {
 		return nil, "", fmt.Errorf("Host key callback error: %v", err)
 	}
-	user := parts[0]
-	host := parts[1]
 
 	clientConfig := &ssh.ClientConfig{
 		User:            user,
@@ -465,6 +457,7 @@ func getManualSSHConfig(userHost, keyPath string) (*ssh.ClientConfig, string, er
 	return clientConfig, fmt.Sprintf("%s:22", host), nil
 }
 
+// expandPath expands the "~" to the home directory.
 func expandPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()

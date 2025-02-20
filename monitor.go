@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,10 +20,22 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+type ServiceCheckResult struct {
+	Container string `json:"container"`
+	Port      string `json:"port"`
+	Status    string `json:"status"`
+}
+
 func main() {
 	app := &cli.App{
 		Name:  "monitor",
 		Usage: "Monitor Docker containers and services (local and remote)",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "json",
+				Usage: "Output in JSON format",
+			},
+		},
 		Commands: []*cli.Command{
 			{
 				Name:   "state",
@@ -62,26 +76,36 @@ Options:
 	}
 }
 
-// Full local status
+// Full status (local)
 func fullStatus(c *cli.Context) error {
-	color.Cyan("Checking local Docker containers and services...")
-	return executeLocalDockerStatus(c.Context, []string{})
+	useJSON := c.Bool("json")
+	if !useJSON {
+		color.Cyan("Checking local Docker containers and services...")
+	}
+	return executeLocalDockerStatus(c.Context, []string{}, useJSON)
 }
 
-// Local container states
+// Container states (local)
 func stateOnly(c *cli.Context) error {
-	color.Cyan("Checking local container states...")
-	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"})
+	useJSON := c.Bool("json")
+	if !useJSON {
+		color.Cyan("Checking local container states...")
+	}
+	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"}, useJSON)
 }
 
-// Local service check
+// Service check (local)
 func serviceOnly(c *cli.Context) error {
-	color.Cyan("Checking local service availability...")
-	return executeLocalServiceCheck(c.Context)
+	useJSON := c.Bool("json")
+	if !useJSON {
+		color.Cyan("Checking local service availability...")
+	}
+	return executeLocalServiceCheck(c.Context, useJSON)
 }
 
 // Remote status via SSH
 func remoteStatus(c *cli.Context) error {
+	useJSON := c.Bool("json")
 	host := c.String("host")
 	args := c.Args()
 
@@ -90,8 +114,10 @@ func remoteStatus(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("SSH config error for '%s': %v", host, err)
 		}
-		color.Cyan("Connecting to %s (%s)...", host, remoteAddress)
-		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress)
+		if !useJSON {
+			color.Cyan("Connecting to %s (%s)...", host, remoteAddress)
+		}
+		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress, useJSON)
 	} else if args.Len() > 0 {
 		userHost := args.Get(0)
 		keyPath := c.String("i")
@@ -102,14 +128,30 @@ func remoteStatus(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("SSH config error for '%s': %v", userHost, err)
 		}
-		color.Cyan("Connecting to %s with provided SSH key...", remoteAddress)
-		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress)
+		if !useJSON {
+			color.Cyan("Connecting to %s with provided SSH key...", remoteAddress)
+		}
+		return executeRemoteDockerStatus(c.Context, clientConfig, remoteAddress, useJSON)
 	}
 	return fmt.Errorf("Missing args. Use '--host <alias>' or '<user>@<host> -i <sshkey>'")
 }
 
 // Run docker ps locally
-func executeLocalDockerStatus(ctx context.Context, args []string) error {
+func executeLocalDockerStatus(ctx context.Context, args []string, useJSON bool) error {
+	if useJSON {
+		baseArgs := []string{"ps", "--format", "{{json .}}"}
+		cmdArgs := append(baseArgs, args...)
+		cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("docker ps failed: %v\n%s", err, string(output))
+		}
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		jsonArray := "[" + strings.Join(lines, ",") + "]"
+		fmt.Println(jsonArray)
+		return nil
+	}
+
 	baseArgs := []string{"ps", "--format", "📦 {{.Names}} | 🔹 {{.Status}} | 🔍 {{.Ports}}"}
 	cmdArgs := append(baseArgs, args...)
 	cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
@@ -127,9 +169,11 @@ func executeLocalDockerStatus(ctx context.Context, args []string) error {
 	return nil
 }
 
-// Check services concurrently
-func executeLocalServiceCheck(ctx context.Context) error {
-	color.Cyan("Checking services on ports...")
+// Check services using net/http
+func executeLocalServiceCheck(ctx context.Context, useJSON bool) error {
+	if !useJSON {
+		color.Cyan("Checking services on ports...")
+	}
 	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}: {{.Ports}}")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -137,12 +181,17 @@ func executeLocalServiceCheck(ctx context.Context) error {
 	}
 	lines := strings.Split(string(output), "\n")
 	if len(lines) == 0 || (len(lines) == 1 && strings.TrimSpace(lines[0]) == "") {
-		color.Yellow("No running containers found!")
+		if !useJSON {
+			color.Yellow("No running containers found!")
+		} else {
+			fmt.Println("[]")
+		}
 		return nil
 	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var results []ServiceCheckResult
 
 	for _, line := range lines {
 		if line == "" {
@@ -163,37 +212,60 @@ func executeLocalServiceCheck(ctx context.Context) error {
 			if len(hostPortParts) < 2 {
 				continue
 			}
-			hostPort := hostPortParts[1]
-			url := fmt.Sprintf("http://localhost:%s", hostPort)
+			port := hostPortParts[1]
+			url := fmt.Sprintf("http://localhost:%s", port)
 			wg.Add(1)
 			go func(container, port, url string) {
 				defer wg.Done()
-				curlCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				defer cancel()
-				curlCmd := exec.CommandContext(curlCtx, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url)
-				out, err := curlCmd.Output()
+				req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+				if err != nil {
+					mu.Lock()
+					results = append(results, ServiceCheckResult{Container: container, Port: port, Status: "request error"})
+					mu.Unlock()
+					return
+				}
+				client := &http.Client{Timeout: 5 * time.Second}
+				resp, err := client.Do(req)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
-					color.Red("%s on port %s is unreachable.", container, port)
-				} else {
-					code := strings.TrimSpace(string(out))
-					if code == "200" {
-						color.Green("%s service is available on port %s.", container, port)
-					} else {
-						color.Yellow("%s service returned HTTP %s on port %s.", container, code, port)
-					}
+					results = append(results, ServiceCheckResult{Container: container, Port: port, Status: "unreachable"})
+					return
 				}
-			}(container, hostPort, url)
+				defer resp.Body.Close()
+				if resp.StatusCode == 200 {
+					results = append(results, ServiceCheckResult{Container: container, Port: port, Status: "available"})
+				} else {
+					results = append(results, ServiceCheckResult{Container: container, Port: port, Status: fmt.Sprintf("HTTP %d", resp.StatusCode)})
+				}
+			}(container, port, url)
 		}
 	}
 	wg.Wait()
-	color.Green("Service check completed.")
+	if useJSON {
+		jsonData, err := json.Marshal(results)
+		if err != nil {
+			return fmt.Errorf("JSON marshal error: %v", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		for _, r := range results {
+			switch r.Status {
+			case "available":
+				color.Green("%s service is available on port %s.", r.Container, r.Port)
+			case "unreachable":
+				color.Red("%s on port %s is unreachable.", r.Container, r.Port)
+			default:
+				color.Yellow("%s service returned %s on port %s.", r.Container, r.Status, r.Port)
+			}
+		}
+		color.Green("Service check completed.")
+	}
 	return nil
 }
 
-// Run docker ps on remote host
-func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, addr string) error {
+// Run docker ps on remote host via SSH
+func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, addr string, useJSON bool) error {
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return fmt.Errorf("Failed to connect to %s: %v", addr, err)
@@ -208,15 +280,32 @@ func executeRemoteDockerStatus(ctx context.Context, config *ssh.ClientConfig, ad
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	if err := session.Run("docker ps --format '📦 {{.Names}} | 🔹 {{.Status}} | 🔎 {{.Ports}}'"); err != nil {
+
+	if useJSON {
+		err = session.Run("docker ps --format '{{json .}}'")
+	} else {
+		err = session.Run("docker ps --format '📦 {{.Names}} | 🔹 {{.Status}} | 🔎 {{.Ports}}'")
+	}
+	if err != nil {
 		return fmt.Errorf("docker ps failed on %s: %v", addr, err)
 	}
-	trimmed := strings.TrimSpace(b.String())
-	if trimmed == "" {
-		color.Yellow("No running containers on remote host!")
+
+	output := strings.TrimSpace(b.String())
+	if output == "" {
+		if useJSON {
+			fmt.Println("[]")
+		} else {
+			color.Yellow("No running containers on remote host!")
+		}
 	} else {
-		color.Green("Remote Containers:")
-		fmt.Println(trimmed)
+		if useJSON {
+			lines := strings.Split(output, "\n")
+			jsonArray := "[" + strings.Join(lines, ",") + "]"
+			fmt.Println(jsonArray)
+		} else {
+			color.Green("Remote Containers:")
+			fmt.Println(output)
+		}
 	}
 	return nil
 }

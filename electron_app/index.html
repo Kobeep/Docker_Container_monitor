@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Docker Monitor</title>
+</head>
+<body>
+  <h1>Docker Monitor</h1>
+  <button id="btnState">Check State</button>
+  <button id="btnService">Check Service</button>
+  <pre id="output"></pre>
+
+  <script>
+    // Call CLI
+    const output = document.getElementById('output');
+
+    document.getElementById('btnState').addEventListener('click', async () => {
+      output.textContent = 'Running "monitor state"...';
+      try {
+        const res = await window.electronAPI.runMonitor(['state']);
+        output.textContent = res;
+      } catch (err) {
+        output.textContent = `Error: ${err}`;
+      }
+    });
+
+    document.getElementById('btnService').addEventListener('click', async () => {
+      output.textContent = 'Running "monitor service"...';
+      try {
+        const res = await window.electronAPI.runMonitor(['service']);
+        output.textContent = res;
+      } catch (err) {
+        output.textContent = `Error: ${err}`;
+      }
+    });
+  </script>
+</body>
+</html>

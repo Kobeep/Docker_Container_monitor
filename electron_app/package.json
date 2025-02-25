@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "echo 'Running basic Electron test...' && npx electron --version"
   },
   "dependencies": {
-    "electron": "^25.2.1"
+    "electron": "^25.2.1",
+    "dockerode": "^3.3.3",
+    "ssh-config": "^2.2.3"
   }
 }

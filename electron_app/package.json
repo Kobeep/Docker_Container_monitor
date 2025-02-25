@@ -9,6 +9,6 @@
   "dependencies": {
     "electron": "^25.2.1",
     "dockerode": "^3.3.3",
-    "ssh-config": "^2.2.3"
+    "ssh-config": "^2.2.4"
   }
 }

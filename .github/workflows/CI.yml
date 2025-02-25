@@ -78,27 +78,30 @@ jobs:
       - name: Stop and Clean Up Docker Containers
         run: docker compose down
 
-  ElectronApp:
-    name: Build/Test Electron App
-    needs: [CLI]
-    runs-on: ubuntu-latest
+    ElectronApp:
+      runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+      steps:
+        - name: Checkout Repository
+          uses: actions/checkout@v3
 
-      - name: Set up Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
+        - name: Set up Node
+          uses: actions/setup-node@v3
+          with:
+            node-version: '16'
 
-      - name: Install Electron Dependencies
-        run: |
-          cd electron_app
-          npm install
+        - name: Install Dependencies
+          run: |
+            cd electron_app
+            npm install
 
-      - name: Test Electron App
-        run: |
-          cd electron_app
-          # Przykład: npm run test (dodaj w package.json skrypt "test")
-          npm run test
+        - name: Fix Electron sandbox
+          run: |
+            cd electron_app
+            sudo chown root:root node_modules/electron/dist/chrome-sandbox
+            sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
+        - name: Test Electron App
+          run: |
+            cd electron_app
+            npm test

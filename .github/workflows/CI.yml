@@ -101,7 +101,10 @@ jobs:
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
-      - name: Test Electron App
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Run Electron Tests
         run: |
           cd electron_app
-          npm test
+          xvfb-run -a npm test

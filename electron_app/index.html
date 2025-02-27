@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Electron Docker Monitor</title>
+  <style>
+    body { font-family: sans-serif; margin: 1rem; }
+    #containerList { white-space: pre; background: #f1f1f1; padding: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Electron Docker Monitor</h1>
+
+  <button id="btnStart">Start Polling</button>
+  <div id="containerList">No data yet</div>
+
+  <hr/>
+
+  <h2>Remote Hosts</h2>
+  <select id="sshSelect"></select>
+  <button id="btnConnect">Connect Remote</button>
+  <div id="remoteStatus"></div>
+
+  <script>
+    // UI references
+    const btnStart = document.getElementById('btnStart');
+    const containerList = document.getElementById('containerList');
+    const sshSelect = document.getElementById('sshSelect');
+    const btnConnect = document.getElementById('btnConnect');
+    const remoteStatus = document.getElementById('remoteStatus');
+
+    // Populate SSH hosts on load
+    window.electronAPI.getSSHHosts().then((hosts) => {
+      sshSelect.innerHTML = '';
+      hosts.forEach((h) => {
+        const opt = document.createElement('option');
+        opt.value = h;
+        opt.textContent = h;
+        sshSelect.appendChild(opt);
+      });
+    });
+
+    // Continuous local container poll
+    let pollInterval = null;
+    btnStart.addEventListener('click', async () => {
+      // Clear old poll if any
+      if (pollInterval) clearInterval(pollInterval);
+      // Start new poll
+      pollInterval = setInterval(async () => {
+        const data = await window.electronAPI.startPoll();
+        containerList.textContent = JSON.stringify(data, null, 2);
+      }, 3000);
+    });
+
+    // Connect remote
+    btnConnect.addEventListener('click', async () => {
+      const selected = sshSelect.value;
+      if (!selected) return;
+      const res = await window.electronAPI.connectRemote(selected);
+      remoteStatus.textContent = res;
+    });
+  </script>
+</body>
+</html>

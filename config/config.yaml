@@ -1,0 +1,5 @@
+hosts:
+  - alias: local
+    address: "localhost:2375"
+thresholds:
+  service_response: 200ms

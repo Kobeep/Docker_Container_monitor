@@ -1,38 +1,27 @@
 package docker
 
 import (
-    "context"
-    "fmt"
-    "io"
-    "os"
+	"fmt"
+	"os"
+	"os/exec"
 
-    "github.com/docker/docker/api/types"
-    "github.com/docker/docker/client"
-    "github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v2"
 )
 
+// LogsCmd tails or follows logs of a container
 func LogsCmd(c *cli.Context) error {
-    cliDocker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-    if err != nil {
-        return err
-    }
-    defer cliDocker.Close()
-    if c.Args().Len() == 0 {
-        return fmt.Errorf("provide container name")
-    }
-    name := c.Args().Get(0)
-    tail := c.Int("tail")
-    follow := c.Bool("follow")
-    return TailContainerLogs(c.Context, cliDocker, name, tail, follow, os.Stdout)
-}
+	if c.Args().Len() < 1 {
+		return fmt.Errorf("provide container name")
+	}
+	name := c.Args().Get(0)
+	args := []string{"logs", "--tail", fmt.Sprint(c.Int("tail"))}
+	if c.Bool("follow") {
+		args = append(args, "-f")
+	}
+	args = append(args, name)
 
-func TailContainerLogs(ctx context.Context, cli *client.Client, container string, tail int, follow bool, out io.Writer) error {
-    opts := types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Tail: fmt.Sprint(tail), Follow: follow}
-    reader, err := cli.ContainerLogs(ctx, container, opts)
-    if err != nil {
-        return err
-    }
-    defer reader.Close()
-    _, err = io.Copy(out, reader)
-    return err
+	cmd := exec.CommandContext(c.Context, "docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

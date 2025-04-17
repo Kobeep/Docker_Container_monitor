@@ -1,76 +1,53 @@
 package docker
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
-	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/client"
+	"github.com/fatih/color"
+	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
 )
 
+// StatsCmd shows container stats in a table
 func StatsCmd(c *cli.Context) error {
-	containers := c.Args().Slice()
-	formatRaw := []string{"stats", "--no-stream", "--format", "{{json .}}"}
-	formatPretty := []string{"stats", "--no-stream", "--format",
-		"📊 {{.Name}} | CPU: {{.CPUPerc}} | MEM: {{.MemUsage}}"}
-
-	args := formatPretty
+	rawArgs := []string{"stats", "--no-stream", "--format", "{{json .}}"}
+	prettyArgs := []string{"stats", "--no-stream", "--format",
+		"⚙️ {{.Name}}|{{.CPUPerc}}|🧠 {{.MemUsage}}|💾 {{.BlockIO}}|🌐 {{.NetIO}}"}
+	args := prettyArgs
 	if c.Bool("json") {
-		args = formatRaw
+		args = rawArgs
 	}
-	args = append(args, containers...)
+	args = append(args, c.Args().Slice()...)
 
-	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker stats failed: %v\n%s", err, out)
 	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if c.Bool("json") {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		fmt.Println("[" + strings.Join(lines, ",") + "]")
-	} else {
-		fmt.Println(string(out))
+		return nil
 	}
-	return nil
-}
 
-func StreamStats(ctx context.Context, cli *client.Client, containers []string, interval time.Duration, useJSON bool) error {
-	for {
-		for _, id := range containers {
-			resp, err := cli.ContainerStatsOneShot(ctx, id)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			var stats types.StatsJSON
-			json.NewDecoder(resp.Body).Decode(&stats)
-			if useJSON {
-				b, _ := json.Marshal(stats)
-				fmt.Println(string(b))
-			} else {
-				fmt.Printf("%s: CPU %.2f%% MEM %.2fMiB\n", id, calcCPU(stats), float64(stats.MemoryStats.Usage)/1024/1024)
-			}
-			resp.Body.Close()
-		}
-		if !useJSON {
-			time.Sleep(interval)
-		} else {
-			break
-		}
-	}
-	return nil
-}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Container", "CPU %", "Memory", "Disk I/O", "Net I/O"})
+	table.SetCaption(true, color.CyanString("Live stats"))
 
-func calcCPU(s types.StatsJSON) float64 {
-	delta := float64(s.CPUStats.CPUUsage.TotalUsage - s.PreCPUStats.CPUUsage.TotalUsage)
-	system := float64(s.CPUStats.SystemUsage - s.PreCPUStats.SystemUsage)
-	if system > 0 && delta > 0 {
-		return (delta / system) * float64(len(s.CPUStats.CPUUsage.PercpuUsage)) * 100
+	for _, ln := range lines {
+		parts := strings.Split(ln, "|")
+		if len(parts) != 5 {
+			continue
+		}
+		table.Append([]string{
+			strings.TrimPrefix(parts[0], "⚙️ "), parts[1],
+			strings.TrimPrefix(parts[2], "🧠 "), strings.TrimPrefix(parts[3], "💾 "),
+			strings.TrimPrefix(parts[4], "🌐 "),
+		})
 	}
-	return 0
+	table.Render()
+	return nil
 }

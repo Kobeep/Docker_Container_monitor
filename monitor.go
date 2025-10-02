@@ -5,14 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/fatih/color"
 	"github.com/kevinburke/ssh_config"
@@ -27,14 +33,29 @@ type ServiceCheckResult struct {
 	Status    string `json:"status"`
 }
 
+type ContainerStat struct {
+	Name        string  `json:"name"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemUsage    uint64  `json:"mem_usage"`
+	MemLimit    uint64  `json:"mem_limit"`
+	MemPercent  float64 `json:"mem_percent"`
+	NetInput    uint64  `json:"net_input"`
+	NetOutput   uint64  `json:"net_output"`
+}
+
 func main() {
 	app := &cli.App{
-		Name:  "monitor",
-		Usage: "Monitor Docker containers, services and events (local and remote)",
+		Name:    "monitor",
+		Usage:   "Monitor Docker containers, services and events (local and remote)",
+		Version: "1.1.0",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "json",
 				Usage: "Output in JSON format",
+			},
+			&cli.StringFlag{
+				Name:  "filter",
+				Usage: "Filter containers (e.g., 'name=nginx', 'status=running', 'label=env=prod')",
 			},
 		},
 		Commands: []*cli.Command{
@@ -47,6 +68,41 @@ func main() {
 				Name:   "service",
 				Usage:  "Show service statuses",
 				Action: serviceOnly,
+			},
+			{
+				Name:   "watch",
+				Usage:  "Continuously monitor containers with auto-refresh",
+				Flags: []cli.Flag{
+					&cli.IntFlag{
+						Name:  "interval",
+						Usage: "Refresh interval in seconds",
+						Value: 2,
+					},
+				},
+				Action: watchMode,
+			},
+			{
+				Name:   "stats",
+				Usage:  "Show container resource statistics (CPU, memory, network)",
+				Action: showStats,
+			},
+			{
+				Name:      "logs",
+				Usage:     "Stream container logs",
+				ArgsUsage: "<container-name>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "follow",
+						Usage: "Follow log output",
+						Aliases: []string{"f"},
+					},
+					&cli.IntFlag{
+						Name:  "tail",
+						Usage: "Number of lines to show from the end",
+						Value: 100,
+					},
+				},
+				Action: containerLogs,
 			},
 			{
 				Name:  "remote",
@@ -85,19 +141,21 @@ Options:
 // fullStatus displays full local Docker container and service status.
 func fullStatus(c *cli.Context) error {
 	useJSON := c.Bool("json")
+	filter := c.String("filter")
 	if !useJSON {
 		color.Cyan("Checking local Docker containers and services...")
 	}
-	return executeLocalDockerStatus(c.Context, []string{}, useJSON)
+	return executeLocalDockerStatus(c.Context, []string{}, useJSON, filter)
 }
 
 // stateOnly displays only container states.
 func stateOnly(c *cli.Context) error {
 	useJSON := c.Bool("json")
+	filter := c.String("filter")
 	if !useJSON {
 		color.Cyan("Checking local container states...")
 	}
-	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"}, useJSON)
+	return executeLocalDockerStatus(c.Context, []string{"--format", "📂 {{.Names}}: 🔹 {{.Status}}"}, useJSON, filter)
 }
 
 // serviceOnly checks local service availability.
@@ -184,9 +242,16 @@ func dockerEvents(c *cli.Context) error {
 }
 
 // executeLocalDockerStatus runs "docker ps" locally.
-func executeLocalDockerStatus(ctx context.Context, args []string, useJSON bool) error {
+func executeLocalDockerStatus(ctx context.Context, args []string, useJSON bool, filter string) error {
+	baseArgs := []string{"ps"}
+
+	// Apply filter if provided
+	if filter != "" {
+		baseArgs = append(baseArgs, "--filter", filter)
+	}
+
 	if useJSON {
-		baseArgs := []string{"ps", "--format", "{{json .}}"}
+		baseArgs = append(baseArgs, "--format", "{{json .}}")
 		cmdArgs := append(baseArgs, args...)
 		cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
 		output, err := cmd.CombinedOutput()
@@ -199,7 +264,7 @@ func executeLocalDockerStatus(ctx context.Context, args []string, useJSON bool) 
 		return nil
 	}
 
-	baseArgs := []string{"ps", "--format", "📦 {{.Names}} | 🔹 {{.Status}} | 🔍 {{.Ports}}"}
+	baseArgs = append(baseArgs, "--format", "📦 {{.Names}} | 🔹 {{.Status}} | 🔍 {{.Ports}}")
 	cmdArgs := append(baseArgs, args...)
 	cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
 	output, err := cmd.CombinedOutput()
@@ -467,4 +532,239 @@ func expandPath(path string) (string, error) {
 		return strings.Replace(path, "~", home, 1), nil
 	}
 	return path, nil
+}
+
+// watchMode continuously monitors containers with auto-refresh
+func watchMode(c *cli.Context) error {
+	interval := c.Int("interval")
+	if interval < 1 {
+		interval = 2
+	}
+
+	color.Cyan("🔄 Watch Mode - Refreshing every %d seconds (Press Ctrl+C to exit)", interval)
+
+	// Setup signal handling for graceful exit
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
+
+	// Display immediately
+	clearScreen()
+	executeLocalDockerStatus(c.Context, []string{}, false, c.String("filter"))
+
+	for {
+		select {
+		case <-ticker.C:
+			clearScreen()
+			executeLocalDockerStatus(c.Context, []string{}, false, c.String("filter"))
+		case <-sigChan:
+			color.Yellow("\n👋 Exiting watch mode...")
+			return nil
+		}
+	}
+}
+
+// clearScreen clears the terminal screen
+func clearScreen() {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("cmd", "/c", "cls")
+		cmd.Stdout = os.Stdout
+		cmd.Run()
+	} else {
+		fmt.Print("\033[H\033[2J")
+	}
+}
+
+// showStats displays container resource statistics
+func showStats(c *cli.Context) error {
+	color.Cyan("📊 Fetching container statistics...")
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("Docker client error: %v", err)
+	}
+	defer cli.Close()
+
+	containers, err := cli.ContainerList(c.Context, container.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("Failed to list containers: %v", err)
+	}
+
+	if len(containers) == 0 {
+		color.Yellow("No running containers found!")
+		return nil
+	}
+
+	var stats []ContainerStat
+	for _, cont := range containers {
+		resp, err := cli.ContainerStats(c.Context, cont.ID, false)
+		if err != nil {
+			color.Yellow("Warning: Could not get stats for %s", cont.Names[0])
+			continue
+		}
+
+		var v types.StatsJSON
+		if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+
+		// Calculate CPU percentage
+		cpuPercent := calculateCPUPercent(&v)
+
+		// Memory stats
+		memUsage := v.MemoryStats.Usage
+		memLimit := v.MemoryStats.Limit
+		memPercent := float64(memUsage) / float64(memLimit) * 100.0
+
+		// Network stats
+		var netInput, netOutput uint64
+		for _, netStats := range v.Networks {
+			netInput += netStats.RxBytes
+			netOutput += netStats.TxBytes
+		}
+
+		containerName := strings.TrimPrefix(cont.Names[0], "/")
+		stats = append(stats, ContainerStat{
+			Name:       containerName,
+			CPUPercent: cpuPercent,
+			MemUsage:   memUsage,
+			MemLimit:   memLimit,
+			MemPercent: memPercent,
+			NetInput:   netInput,
+			NetOutput:  netOutput,
+		})
+	}
+
+	if c.Bool("json") {
+		jsonData, err := json.Marshal(stats)
+		if err != nil {
+			return fmt.Errorf("JSON marshal error: %v", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		printStatsTable(stats)
+	}
+
+	return nil
+}
+
+// calculateCPUPercent calculates the CPU usage percentage
+func calculateCPUPercent(v *types.StatsJSON) float64 {
+	cpuDelta := float64(v.CPUStats.CPUUsage.TotalUsage - v.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(v.CPUStats.SystemUsage - v.PreCPUStats.SystemUsage)
+
+	if systemDelta > 0.0 && cpuDelta > 0.0 {
+		return (cpuDelta / systemDelta) * float64(len(v.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+	}
+	return 0.0
+}
+
+// printStatsTable displays statistics in a formatted table
+func printStatsTable(stats []ContainerStat) {
+	fmt.Println()
+	color.Cyan("┌─────────────────────────────────────────────────────────────────────────────┐")
+	color.Cyan("│                          CONTAINER STATISTICS                               │")
+	color.Cyan("├─────────────────────────────────────────────────────────────────────────────┤")
+
+	// Header
+	fmt.Printf("│ %-20s │ %8s │ %15s │ %20s │\n", "CONTAINER", "CPU %", "MEMORY", "NETWORK I/O")
+	color.Cyan("├─────────────────────────────────────────────────────────────────────────────┤")
+
+	for _, s := range stats {
+		name := truncate(s.Name, 20)
+		cpuStr := fmt.Sprintf("%.2f%%", s.CPUPercent)
+		memStr := fmt.Sprintf("%s / %s", formatBytes(s.MemUsage), formatBytes(s.MemLimit))
+		netStr := fmt.Sprintf("%s / %s", formatBytes(s.NetInput), formatBytes(s.NetOutput))
+
+		// Color coding based on resource usage
+		cpuColor := color.New(color.FgGreen)
+		if s.CPUPercent > 80 {
+			cpuColor = color.New(color.FgRed, color.Bold)
+		} else if s.CPUPercent > 50 {
+			cpuColor = color.New(color.FgYellow)
+		}
+
+		memColor := color.New(color.FgGreen)
+		if s.MemPercent > 80 {
+			memColor = color.New(color.FgRed, color.Bold)
+		} else if s.MemPercent > 50 {
+			memColor = color.New(color.FgYellow)
+		}
+
+		fmt.Printf("│ %-20s │ ", name)
+		cpuColor.Printf("%8s", cpuStr)
+		fmt.Printf(" │ ")
+		memColor.Printf("%15s", memStr)
+		fmt.Printf(" │ %20s │\n", netStr)
+	}
+
+	color.Cyan("└─────────────────────────────────────────────────────────────────────────────┘")
+	fmt.Println()
+}
+
+// formatBytes converts bytes to human-readable format
+func formatBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := uint64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// truncate truncates a string to the specified length
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// containerLogs streams logs from a container
+func containerLogs(c *cli.Context) error {
+	if c.NArg() < 1 {
+		return fmt.Errorf("Container name required. Usage: monitor logs <container-name>")
+	}
+
+	containerName := c.Args().Get(0)
+	follow := c.Bool("follow")
+	tailLines := strconv.Itoa(c.Int("tail"))
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("Docker client error: %v", err)
+	}
+	defer cli.Close()
+
+	options := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     follow,
+		Tail:       tailLines,
+		Timestamps: true,
+	}
+
+	out, err := cli.ContainerLogs(c.Context, containerName, options)
+	if err != nil {
+		return fmt.Errorf("Failed to get logs for %s: %v", containerName, err)
+	}
+	defer out.Close()
+
+	if follow {
+		color.Cyan("📜 Following logs for %s (Press Ctrl+C to exit)...", containerName)
+	} else {
+		color.Cyan("📜 Logs for %s (last %s lines):", containerName, tailLines)
+	}
+	fmt.Println()
+
+	_, err = io.Copy(os.Stdout, out)
+	return err
 }

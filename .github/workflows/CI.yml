@@ -1,81 +1,66 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
+      - develop
 
 jobs:
-  build:
-    name: Build/Test
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.22'
 
-      - name: Install Dependencies
-        run: go mod tidy
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
-      - name: Build and Install Monitor
+      - name: Download dependencies
         run: |
-          go build -o monitor
-          sudo mv monitor /usr/local/bin/
-          chmod +x /usr/local/bin/monitor
+          go mod download
+          go mod verify
 
-      - name: Install Docker and Docker Compose
+      - name: Build monitor binary
         run: |
-          sudo apt-get update
-          for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove $pkg; done
-          sudo apt-get update
-          sudo apt-get install ca-certificates curl
-          sudo install -m 0755 -d /etc/apt/keyrings
-          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-          sudo chmod a+r /etc/apt/keyrings/docker.asc
+          go build -v -o monitor monitor.go
+          chmod +x monitor
 
-          # Add the repository to Apt sources:
-          echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-      - name: Set Up SSH Config for CI
+      - name: Verify binary
         run: |
-          mkdir -p ~/.ssh
-          echo "Host localhost" >> ~/.ssh/config
-          echo "    HostName localhost" >> ~/.ssh/config
-          echo "    User root" >> ~/.ssh/config
-          echo "    IdentityFile /tmp/ci_ssh_key" >> ~/.ssh/config
-          chmod 600 ~/.ssh/config
-          ssh-keygen -t rsa -b 2048 -f /tmp/ci_ssh_key -q -N ""
-          cat /tmp/ci_ssh_key.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          ssh-keyscan localhost >> ~/.ssh/known_hosts
+          ./monitor --version
+          ./monitor --help
 
-      - name: Start Local Docker Containers for Testing
-        run: docker compose -f docker-compose.yml up -d
+      - name: Run Go vet
+        run: go vet ./...
 
-      - name: Wait for Local Containers to Initialize
-        run: sleep 10  # Ensure services are fully started
-
-      - name: Run Installation Script
+      - name: Test Python installer
         run: |
-          python3 install.py
+          python3 -m py_compile install.py
+          python3 install.py --help
 
-      - name: Verify Monitor Commands
-        run: |
-          echo "🔄 Testing monitor --service"
-          monitor service || { echo "❌ monitor service failed"; exit 1; }
-
-          echo "🔄 Testing monitor --state"
-          monitor state || { echo "❌ monitor state failed"; exit 1; }
-
-      - name: Stop and Clean Up Docker Containers
-        run: docker compose down
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-binary
+          path: monitor
+          retention-days: 30

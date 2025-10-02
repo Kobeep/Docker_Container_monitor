@@ -1,6 +1,6 @@
 # Docker Container Monitor 🚀
 
-[![CI/CD Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/CICD.yml/badge.svg)](https://github.com/Kobeep/Docker_Container_monitor/actions)
+[![CI Status](https://github.com/Kobeep/Docker_Container_monitor/actions/workflows/CI.yml/badge.svg)](https://github.com/Kobeep/Docker_Container_monitor/actions)
 
 Docker Container Monitor is a lightweight CLI tool written in Go that monitors running Docker containers and their services. It provides real-time information about container states, checks service availability, and even supports remote monitoring via SSH. The project also includes a Python installer script for an automated setup.
 
